@@ -1,0 +1,381 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>WdSolve</class>
+ <widget class="QMainWindow" name="WdSolve">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1233</width>
+    <height>1025</height>
+   </rect>
+  </property>
+  <property name="sizePolicy">
+   <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+    <horstretch>3</horstretch>
+    <verstretch>0</verstretch>
+   </sizepolicy>
+  </property>
+  <property name="font">
+   <font>
+    <family>Tinos</family>
+    <pointsize>12</pointsize>
+    <bold>true</bold>
+   </font>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">background-color: rgb(246, 245, 244)</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <property name="styleSheet">
+    <string notr="true">background-color: #f8fafc;</string>
+   </property>
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <layout class="QGridLayout" name="gridLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label">
+        <property name="font">
+         <font>
+          <family>Tinos</family>
+          <pointsize>13</pointsize>
+          <bold>true</bold>
+         </font>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: black</string>
+        </property>
+        <property name="text">
+         <string>Giá trị tối ưu: </string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="lineEdit_Z">
+        <property name="font">
+         <font>
+          <family>Tinos</family>
+          <bold>true</bold>
+         </font>
+        </property>
+        <property name="autoFillBackground">
+         <bool>false</bool>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: black</string>
+        </property>
+        <property name="readOnly">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_2">
+        <property name="font">
+         <font>
+          <family>Tinos</family>
+          <pointsize>13</pointsize>
+          <bold>true</bold>
+         </font>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: black</string>
+        </property>
+        <property name="text">
+         <string>Nghiệm tối ưu: </string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QTableWidget" name="table_solution">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>150</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>500</height>
+         </size>
+        </property>
+        <property name="font">
+         <font>
+          <family>Tinos</family>
+          <pointsize>12</pointsize>
+          <bold>true</bold>
+         </font>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: black</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_3">
+        <property name="font">
+         <font>
+          <family>Tinos</family>
+          <pointsize>13</pointsize>
+          <bold>true</bold>
+         </font>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: black</string>
+        </property>
+        <property name="text">
+         <string>Các bước thực thi: </string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QTabWidget" name="tabWidget_steps">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>150</height>
+         </size>
+        </property>
+        <property name="font">
+         <font>
+          <family>Tinos</family>
+          <pointsize>12</pointsize>
+          <bold>true</bold>
+         </font>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: black</string>
+        </property>
+        <property name="currentIndex">
+         <number>2</number>
+        </property>
+        <widget class="QWidget" name="tab">
+         <attribute name="title">
+          <string>Tab 1</string>
+         </attribute>
+        </widget>
+        <widget class="QWidget" name="tab_2">
+         <attribute name="title">
+          <string>Tab 2</string>
+         </attribute>
+        </widget>
+        <widget class="QWidget" name="tab_3">
+         <attribute name="title">
+          <string>Biểu diễn hình học</string>
+         </attribute>
+        </widget>
+       </widget>
+      </item>
+      <item row="3" column="0" colspan="2">
+       <layout class="QHBoxLayout" name="horizontalLayout">
+        <item>
+         <widget class="QPushButton" name="pushButton_2">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>2</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="font">
+           <font>
+            <family>Tinos</family>
+            <pointsize>18</pointsize>
+            <bold>true</bold>
+           </font>
+          </property>
+          <property name="styleSheet">
+           <string notr="true">QPushButton {
+    border: 1px solid #A0A0A0; /* Viền xám nét căng bao quanh 4 cạnh */
+    border-radius: 4px;        /* Bo góc nhẹ cho hiện đại */
+    background-color: #F5F5F5; /* Màu nền xám trắng tinh tế */
+    min-height: 28px;          /* Ép chiều cao chuẩn để không bị lùn */
+    padding: 0px 15px;         /* Khoảng cách từ chữ ra viền */
+    color: #000000;            /* Màu chữ */
+}
+
+/* Hiệu ứng khi lướt chuột qua (Hover) */
+QPushButton:hover {
+    background-color: #E5E5E5;
+    border: 1px solid #0078D7; /* Viền sáng lên màu xanh đặc trưng của Windows */
+}
+
+/* Hiệu ứng khi nhấn chuột xuống (Pressed) */
+QPushButton:pressed {
+    background-color: #D4D4D4;
+}
+
+/* Dành cho nút đang bị vô hiệu hóa (Disabled) */
+QPushButton:disabled {
+    background-color: #F0F0F0;
+    color: #A0A0A0;
+    border: 1px solid #D0D0D0;
+}</string>
+          </property>
+          <property name="text">
+           <string>Biểu diễn hình học (Chỉ hỗ trợ cho trường hợp 2 biến số)</string>
+          </property>
+          <property name="icon">
+           <iconset resource="resource.qrc">
+            <normaloff>:/new/prefix1/Pasted image (7).png</normaloff>:/new/prefix1/Pasted image (7).png</iconset>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QPushButton" name="pushButton_3">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="font">
+           <font>
+            <family>Tinos</family>
+            <pointsize>18</pointsize>
+            <bold>true</bold>
+           </font>
+          </property>
+          <property name="styleSheet">
+           <string notr="true">QPushButton {
+    border: 1px solid #A0A0A0; /* Viền xám nét căng bao quanh 4 cạnh */
+    border-radius: 4px;        /* Bo góc nhẹ cho hiện đại */
+    background-color: #F5F5F5; /* Màu nền xám trắng tinh tế */
+    min-height: 28px;          /* Ép chiều cao chuẩn để không bị lùn */
+    padding: 0px 15px;         /* Khoảng cách từ chữ ra viền */
+    color: #000000;            /* Màu chữ */
+}
+
+/* Hiệu ứng khi lướt chuột qua (Hover) */
+QPushButton:hover {
+    background-color: #E5E5E5;
+    border: 1px solid #0078D7; /* Viền sáng lên màu xanh đặc trưng của Windows */
+}
+
+/* Hiệu ứng khi nhấn chuột xuống (Pressed) */
+QPushButton:pressed {
+    background-color: #D4D4D4;
+}
+
+/* Dành cho nút đang bị vô hiệu hóa (Disabled) */
+QPushButton:disabled {
+    background-color: #F0F0F0;
+    color: #A0A0A0;
+    border: 1px solid #D0D0D0;
+}</string>
+          </property>
+          <property name="text">
+           <string>Hỏi/Đáp</string>
+          </property>
+          <property name="icon">
+           <iconset resource="resource.qrc">
+            <normaloff>:/new/prefix1/Pasted image (6).png</normaloff>:/new/prefix1/Pasted image (6).png</iconset>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer_2">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QPushButton" name="pushButton">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="font">
+           <font>
+            <family>Tinos</family>
+            <pointsize>18</pointsize>
+            <bold>true</bold>
+           </font>
+          </property>
+          <property name="styleSheet">
+           <string notr="true">QPushButton {
+    border: 1px solid #A0A0A0; /* Viền xám nét căng bao quanh 4 cạnh */
+    border-radius: 4px;        /* Bo góc nhẹ cho hiện đại */
+    background-color: #F5F5F5; /* Màu nền xám trắng tinh tế */
+    min-height: 28px;          /* Ép chiều cao chuẩn để không bị lùn */
+    padding: 0px 15px;         /* Khoảng cách từ chữ ra viền */
+    color: #000000;            /* Màu chữ */
+}
+
+/* Hiệu ứng khi lướt chuột qua (Hover) */
+QPushButton:hover {
+    background-color: #E5E5E5;
+    border: 1px solid #0078D7; /* Viền sáng lên màu xanh đặc trưng của Windows */
+}
+
+/* Hiệu ứng khi nhấn chuột xuống (Pressed) */
+QPushButton:pressed {
+    background-color: #D4D4D4;
+}
+
+/* Dành cho nút đang bị vô hiệu hóa (Disabled) */
+QPushButton:disabled {
+    background-color: #F0F0F0;
+    color: #A0A0A0;
+    border: 1px solid #D0D0D0;
+}</string>
+          </property>
+          <property name="text">
+           <string>OK</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1233</width>
+     <height>23</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <resources>
+  <include location="resource.qrc"/>
+ </resources>
+ <connections/>
+</ui>
