@@ -10,8 +10,10 @@
 #include <QUrl>
 #include <QSettings>
 #include <QCoreApplication>
-#include <QStandardPaths> // [FIX MỚI] Thư viện để lưu file xuyên hệ điều hành
-#include <QDir>           // [FIX MỚI] Xử lý tạo thư mục
+
+// THÊM 2 THƯ VIỆN NÀY ĐỂ LƯU API KEY XUYÊN HỆ ĐIỀU HÀNH
+#include <QStandardPaths>
+#include <QDir>
 
 // Các thư viện UI cần thiết
 #include <QInputDialog>
@@ -23,15 +25,15 @@
 #include <functional>
 
 // =======================================================================
-// [FIX MỚI] Hàm lấy đường dẫn an toàn để lưu cấu hình (Settings & API Key)
+// [CHỈ DÀNH CHO API] Hàm lấy đường dẫn an toàn để lưu API Key
 // =======================================================================
-static QString getSettingsPath() {
+static QString getApiKeyPath() {
     QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir dir;
     if (!dir.exists(dataDir)) {
         dir.mkpath(dataDir);
     }
-    return dataDir + "/settings.ini";
+    return dataDir + "/apikey.ini";
 }
 
 // =======================================================================
@@ -47,9 +49,12 @@ static void verifyAndSaveApiKey(WdChatBot* parentWindow, QTextEdit* chatDisplay,
     QObject::connect(reply, &QNetworkReply::finished, parentWindow, [=]() {
         bool isValid = (reply->error() == QNetworkReply::NoError);
         if (isValid) {
-            // [FIX] Lưu API Key vào AppData thay vì thư mục App
-            QSettings settings(getSettingsPath(), QSettings::IniFormat);
-            settings.setValue("api_key", newKey);
+            // 1. LƯU API KEY VÀO THƯ MỤC HỆ THỐNG ĐỂ KHÔNG BỊ MẤT
+            QSettings apiSettings(getApiKeyPath(), QSettings::IniFormat);
+            apiSettings.setValue("api_key", newKey);
+
+            // 2. GIỮ NGUYÊN CODE ĐỌC MÀU SẮC CỦA BẠN
+            QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
             bool isDark = settings.value("dark_mode", false).toBool();
             QString sysColor = isDark ? "#A6E3A1" : "#28A745"; // Xanh lá cây sáng/tối
 
@@ -91,9 +96,9 @@ void WdChatBot::onUserSendMessage() {
     // XỬ LÝ NHẬP KEY QUA LỆNH ẨN /key
     if (userMessage == "/key") {
         ui->inputField->clear();
-        // [FIX] Đọc Settings từ AppData
-        QSettings settings(getSettingsPath(), QSettings::IniFormat);
-        QString currentKey = settings.value("api_key", "").toString();
+        // [FIX] ĐỌC API KEY TỪ THƯ MỤC HỆ THỐNG
+        QSettings apiSettings(getApiKeyPath(), QSettings::IniFormat);
+        QString currentKey = apiSettings.value("api_key", "").toString();
 
         bool ok;
         QString newKey = QInputDialog::getText(this, "Cài đặt API Key",
@@ -111,8 +116,8 @@ void WdChatBot::onUserSendMessage() {
         isFirstMessage = false;
     }
 
-    // LẤY MÀU ĐỘNG CHO CHỮ CỦA USER
-    QSettings settings(getSettingsPath(), QSettings::IniFormat);
+    // LẤY MÀU ĐỘNG CHO CHỮ CỦA USER (GIỮ NGUYÊN CODE CỦA BẠN)
+    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
     bool isDark = settings.value("dark_mode", false).toBool();
     QString userColor = isDark ? "#89B4FA" : "#0055ff"; // Xanh dương sáng (Tối) hoặc Xanh dương đậm (Sáng)
 
@@ -130,9 +135,13 @@ void WdChatBot::onUserSendMessage() {
 }
 
 void WdChatBot::askGroq(const QString& question) {
-    // [FIX] Đọc Settings và API Key từ AppData
-    QSettings settings(getSettingsPath(), QSettings::IniFormat);
-    QString apiKey = settings.value("api_key", "").toString().trimmed();
+    // 1. [FIX] ĐỌC API KEY TỪ THƯ MỤC HỆ THỐNG
+    QSettings apiSettings(getApiKeyPath(), QSettings::IniFormat);
+    QString apiKey = apiSettings.value("api_key", "").toString().trimmed();
+
+    // 2. [GIỮ NGUYÊN] ĐỌC MÀU SẮC TỪ CODE CỦA BẠN
+    QString iniPath = QCoreApplication::applicationDirPath() + "/settings.ini";
+    QSettings settings(iniPath, QSettings::IniFormat);
     bool isDark = settings.value("dark_mode", false).toBool();
 
     // LẤY MÀU ĐỘNG CHO BOT, HỆ THỐNG VÀ LỖI
