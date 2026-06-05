@@ -956,7 +956,7 @@ void Dashboard::on_btn_HuongDan_clicked()
 
         <p style="font-size: 15px;">
             🌐 Xem chi tiết file hướng dẫn (PDF):
-            <a href="https://github.com/Alee-deg/Project-of-Alee/blob/Algorithm_of_Hau/LinkDonwLoadApp.pdf" style="color: #0078D7; text-decoration: none; font-weight: bold;">Tại đây</a>
+            <a href="https://github.com/Alee-deg/SolveLinearProgramming/blob/main/HDSD.pdf" style="color: #0078D7; text-decoration: none; font-weight: bold;">Tại đây</a>
         </p>
     )";
 
