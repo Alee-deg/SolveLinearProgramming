@@ -11,6 +11,40 @@
 #include <QSettings>
 #include <QCoreApplication>
 
+// Các thư viện UI cần thiết
+#include <QInputDialog>
+#include <QMessageBox>
+#include <QMenuBar>
+#include <QMenu>
+#include <QAction>
+#include <QProgressDialog>
+#include <functional>
+
+// =======================================================================
+// Hàm xác thực API Key ngầm (Không làm đơ màn hình)
+// =======================================================================
+static void verifyAndSaveApiKey(WdChatBot* parentWindow, QTextEdit* chatDisplay, const QString& newKey, std::function<void(bool)> onFinished) {
+    QNetworkAccessManager *manager = new QNetworkAccessManager(parentWindow);
+    QNetworkRequest request(QUrl("https://api.groq.com/openai/v1/models"));
+    request.setRawHeader("Authorization", "Bearer " + newKey.toUtf8());
+
+    QNetworkReply *reply = manager->get(request);
+
+    QObject::connect(reply, &QNetworkReply::finished, parentWindow, [=]() {
+        bool isValid = (reply->error() == QNetworkReply::NoError);
+        if (isValid) {
+            QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+            settings.setValue("api_key", newKey);
+            chatDisplay->append("<div style='color: #89B4FA; margin-bottom: 5px;'><b>Hệ thống:</b> API Key đã được cập nhật thành công!</div>");
+        } else {
+            QMessageBox::critical(parentWindow, "Lỗi xác thực", "API Key không hợp lệ, vui lòng kiểm tra lại!");
+        }
+        if (onFinished) onFinished(isValid);
+        reply->deleteLater();
+        manager->deleteLater();
+    });
+}
+
 WdChatBot::WdChatBot(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::WdChatBot)
@@ -18,7 +52,8 @@ WdChatBot::WdChatBot(QWidget *parent)
     ui->setupUi(this);
     this->isFirstMessage = true;
 
-    // Bắt sự kiện nhấn phím Enter (returnPressed) trên inputField
+    menuBar()->hide();
+
     connect(ui->inputField, &QLineEdit::returnPressed, this, &WdChatBot::onUserSendMessage);
     this->setWindowTitle("Hỏi/Đáp");
     this->setWindowState(Qt::WindowMaximized);
@@ -34,6 +69,25 @@ void WdChatBot::onUserSendMessage() {
     QString userMessage = ui->inputField->text().trimmed();
     if (userMessage.isEmpty()) return;
 
+    // XỬ LÝ NHẬP KEY QUA LỆNH ẨN /key
+    if (userMessage == "/key") {
+        ui->inputField->clear();
+        QString iniPath = QCoreApplication::applicationDirPath() + "/settings.ini";
+        QSettings settings(iniPath, QSettings::IniFormat);
+        QString currentKey = settings.value("api_key", "").toString();
+
+        bool ok;
+        QString newKey = QInputDialog::getText(this, "Cài đặt API Key",
+                                               "Vui lòng dán API Key của Groq vào bên dưới:",
+                                               QLineEdit::Password,
+                                               currentKey, &ok);
+        if (ok && !newKey.trimmed().isEmpty()) {
+            // [ÁP DỤNG MỚI] Đưa vào hàm kiểm tra trước khi lưu
+            verifyAndSaveApiKey(this, ui->chatDisplay, newKey.trimmed(), nullptr);
+        }
+        return;
+    }
+
     if (isFirstMessage) {
         ui->chatDisplay->clear();
         isFirstMessage = false;
@@ -46,60 +100,71 @@ void WdChatBot::onUserSendMessage() {
 
     ui->inputField->clear();
 
-    // --- HIỆU ỨNG CHỜ ---
     ui->inputField->setPlaceholderText("AI đang suy nghĩ...");
-    ui->inputField->setEnabled(false); // Khóa khung nhập để tránh người dùng spam phím Enter
+    ui->inputField->setEnabled(false);
 
     // Gọi hàm gửi lên Groq
     askGroq(userMessage);
 }
 
 void WdChatBot::askGroq(const QString& question) {
-    // 1. ĐỌC API KEY TỪ FILE settings.ini NẰM CẠNH FILE CHẠY
     QString iniPath = QCoreApplication::applicationDirPath() + "/settings.ini";
     QSettings settings(iniPath, QSettings::IniFormat);
     QString apiKey = settings.value("api_key", "").toString().trimmed();
 
-    // Nếu không tìm thấy file hoặc key trống, thông báo lỗi ngay trên màn hình chat và dừng lại
+    // XỬ LÝ TỰ ĐỘNG HỎI NẾU KEY TRỐNG
     if (apiKey.isEmpty()) {
-        ui->chatDisplay->append("<div style='color: orange; margin-bottom: 15px;'>"
-                                "<b>Hệ thống:</b> Không tìm thấy API Key! "
-                                "Vui lòng tạo file <code>settings.ini</code> đặt cạnh file chạy ứng dụng với nội dung:<br>"
-                                "<code>[General]</code><br><code>api_key=gsk_your_key_here</code>"
-                                "</div>");
+        bool ok;
+        QString newKey = QInputDialog::getText(this, "Yêu cầu API Key",
+                                               "Bạn chưa thiết lập API Key.\nVui lòng dán mã API Key của Groq để kích hoạt Chatbot:",
+                                               QLineEdit::Password, "", &ok);
+        if (ok && !newKey.trimmed().isEmpty()) {
+            // [ÁP DỤNG MỚI] Đưa vào hàm kiểm tra
+            verifyAndSaveApiKey(this, ui->chatDisplay, newKey.trimmed(), [this, question](bool isValid) {
+                if (isValid) {
+                    // Nếu Key chuẩn, gọi vòng lặp lại hàm askGroq để đi chat tiếp!
+                    this->askGroq(question);
+                } else {
+                    // Mở lại khung chat nếu key lỗi
+                    ui->inputField->setEnabled(true);
+                    ui->inputField->setPlaceholderText("Nhập câu hỏi của bạn . . .");
+                    ui->inputField->setFocus();
+                }
+            });
+        } else {
+            ui->chatDisplay->append("<div style='color: #E67E22; margin-bottom: 15px;'>"
+                                    "<b>Hệ thống:</b> Bạn chưa nhập API Key nên Chatbot không thể hoạt động.<br>"
+                                    "<i>(Bạn có thể cài đặt lại ở menu <b>⚙️ Cài đặt</b> trên góc màn hình, hoặc gõ lệnh <b>/key</b> vào khung chat)</i>"
+                                    "</div>");
 
-        // Mở khóa lại khung nhập liệu để người dùng thử lại sau
-        ui->inputField->setEnabled(true);
-        ui->inputField->setPlaceholderText("Nhập câu hỏi của bạn . . .");
-        ui->inputField->setFocus();
-        return;
+            ui->inputField->setEnabled(true);
+            ui->inputField->setPlaceholderText("Nhập câu hỏi của bạn . . .");
+            ui->inputField->setFocus();
+        }
+        return; // Phải dừng lại chờ tín hiệu mạng Async phản hồi
     }
 
     QNetworkAccessManager *manager = new QNetworkAccessManager(this);
     QNetworkRequest request(QUrl("https://api.groq.com/openai/v1/chat/completions"));
 
-    // Sử dụng API Key vừa đọc được một cách động
     request.setRawHeader("Authorization", "Bearer " + apiKey.toUtf8());
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
-    // Tạo cấu trúc tin nhắn JSON
     QJsonObject message;
     message["role"] = "user";
     message["content"] = question;
 
     QJsonArray messages;
 
-    // 1. CHÈN BỐI CẢNH BÀI TOÁN (NẾU CÓ) VỚI VAI TRÒ "SYSTEM"
     if (!problemContext.isEmpty()) {
         QJsonObject systemMessage;
         systemMessage["role"] = "system";
-        systemMessage["content"] = "Bạn là một giáo sư toán học chuyêMn về Quy hoạch tuyến tính. "
+        systemMessage["content"] = "Bạn là một giáo sư toán học chuyên về Quy hoạch tuyến tính. "
                                    "Hãy trả lời câu hỏi của người dùng dựa trên bài toán họ đang giải dưới đây:\n\n"
                                    + problemContext;
         messages.append(systemMessage);
     }
 
-    // 2. CHÈN CÂU HỎI CỦA NGƯỜI DÙNG
     QJsonObject userMessage;
     userMessage["role"] = "user";
     userMessage["content"] = question;
@@ -109,13 +174,10 @@ void WdChatBot::askGroq(const QString& question) {
     body["model"] = "llama-3.1-8b-instant";
     body["messages"] = messages;
 
-    // Gửi POST Request
     QNetworkReply *reply = manager->post(request, QJsonDocument(body).toJson());
 
-    // Xử lý khi nhận được câu trả lời từ máy chủ
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-
-        // Mở khóa thanh nhập liệu trở lại bình thường
+        // Mở khóa thanh nhập liệu
         ui->inputField->setEnabled(true);
         ui->inputField->setPlaceholderText("Nhập câu hỏi của bạn . . .");
         ui->inputField->setFocus();
@@ -125,29 +187,30 @@ void WdChatBot::askGroq(const QString& question) {
             QJsonDocument jsonDoc = QJsonDocument::fromJson(response);
             QJsonObject root = jsonDoc.object();
 
-            // Bóc tách lấy đúng phần văn bản AI trả lời
             QString answer = root["choices"].toArray()[0].toObject()["message"].toObject()["content"].toString();
-
-            // Thay ký tự xuống dòng \n bằng thẻ <br> để Qt hiển thị đúng HTML
             answer.replace("\n", "<br>");
 
-            // In câu trả lời lên màn hình
             ui->chatDisplay->append("<div style='margin-bottom: 15px; color: #222222;'>"
                                     "<b>Bot:</b> " + answer +
                                     "</div>");
         } else {
-            // Xử lý nếu mất mạng hoặc API Key sai
             QByteArray errorData = reply->readAll();
             QString errorMessage = QString::fromUtf8(errorData);
 
-            // In chi tiết lỗi lên màn hình Chat
-            ui->chatDisplay->append("<div style='color: red; margin-bottom: 15px;'>"
-                                    "<b>Lỗi mạng:</b> " + reply->errorString() + "<br>"
-                                                             "<b>Chi tiết lỗi:</b> " + errorMessage +
-                                    "</div>");
+            if (errorMessage.contains("invalid_api_key", Qt::CaseInsensitive) || errorMessage.contains("Invalid API Key", Qt::CaseInsensitive)) {
+                ui->chatDisplay->append("<div style='color: #D32F2F; margin-bottom: 15px;'>"
+                                        "<b>Lỗi xác thực:</b> API Key của bạn bị sai, không hợp lệ hoặc đã bị khóa!<br>"
+                                        "<i>&rarr; Vui lòng gõ lệnh <b>/key</b>) vào thanh chat để sửa lại Key.</i>"
+                                        "</div>");
+            } else {
+                ui->chatDisplay->append("<div style='color: #D32F2F; margin-bottom: 15px;'>"
+                                        "<b>Lỗi mạng:</b> " + reply->errorString() + "<br>"
+                                                                 "<b>Chi tiết lỗi:</b> " + errorMessage +
+                                        "</div>");
+            }
         }
 
-        reply->deleteLater(); // Dọn dẹp bộ nhớ
+        reply->deleteLater();
     });
 }
 

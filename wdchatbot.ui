@@ -15,7 +15,7 @@
   </property>
   <widget class="QWidget" name="centralwidget">
    <property name="styleSheet">
-    <string notr="true">background-color: #f8fafc;</string>
+    <string notr="true"/>
    </property>
    <layout class="QVBoxLayout" name="verticalLayout">
     <item>
@@ -43,7 +43,7 @@ li.checked::marker { content: &quot;\2612&quot;; }
     <item>
      <widget class="QLineEdit" name="inputField">
       <property name="styleSheet">
-       <string notr="true">color: black</string>
+       <string notr="true"/>
       </property>
       <property name="placeholderText">
        <string>Nhập câu hỏi của bạn....</string>

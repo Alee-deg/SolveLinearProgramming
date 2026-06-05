@@ -5,17 +5,25 @@
 #include <QString>
 #include <QMessageBox>
 #include <QTextEdit>
+#include <QSettings>
+#include <QDir>
 
 WdSolve::WdSolve(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::WdSolve)
 {
     ui->setupUi(this);
-    this->setStyleSheet("* { font-family: 'Times New Roman'; font-size: 11pt; }");
+
+    // =======================================================================
+    // [FIX GIAO DIỆN] Đã gỡ bỏ setStyleSheet cứng ở đây để tôn trọng
+    // "Công tắc tổng" ở MainWindow.
+    // =======================================================================
+    this->setStyleSheet("");
+
     this->setWindowTitle("Kết quả tính toán");
     this->setWindowState(Qt::WindowMaximized);
     this->setWindowIcon(QIcon(":/logo.png"));
-    // Khởi tạo con trỏ bằng nullptr (chưa tạo cửa sổ)
+
     this->wd_show    = nullptr;
     this->wd_ChatBot = nullptr;
 }
@@ -23,8 +31,6 @@ WdSolve::WdSolve(QWidget *parent)
 WdSolve::~WdSolve()
 {
     delete ui;
-    // Lưu ý: wd_show và wd_ChatBot đã được gán parent là 'this'
-    // nên Qt sẽ tự động giải phóng bộ nhớ của chúng khi WdSolve bị hủy.
 }
 
 void WdSolve::displayResults(const LinearProgram& lp,
@@ -37,8 +43,12 @@ void WdSolve::displayResults(const LinearProgram& lp,
 {
     this->currentAltSolution = altSolution;
 
+    // ĐỌC TRẠNG THÁI GIAO DIỆN SÁNG / TỐI TỪ MAINWINDOW
+    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    bool isDark = settings.value("dark_mode", false).toBool();
+
     // ===============================================================
-    // [ĐÃ SỬA]: TIỀN XỬ LÝ LỊCH SỬ BƯỚC GIẢI (Đánh số lại Từ vựng tự động)
+    // TIỀN XỬ LÝ LỊCH SỬ BƯỚC GIẢI
     // ===============================================================
     std::vector<SimplexStep> modHistory = history;
     int vocabCount = 1;
@@ -51,7 +61,6 @@ void WdSolve::displayResults(const LinearProgram& lp,
             vocabCount++;
         }
 
-        // Bỏ chữ "Điểm tối ưu thứ 2", tự động điền "Từ vựng X"
         if (modHistory[i].stepName.contains("Điểm tối ưu thứ 2", Qt::CaseInsensitive)) {
             modHistory[i].stepName = QString("Từ vựng %1").arg(vocabCount);
         } else {
@@ -59,7 +68,6 @@ void WdSolve::displayResults(const LinearProgram& lp,
         }
     }
 
-    // --- Khởi tạo varNames sớm để dùng chung cho cả Bảng Nghiệm và HTML ---
     std::vector<QString> varNames;
     for (size_t i = 0; i < originalLp.varBounds.size(); ++i) {
         if (originalLp.varBounds[i].isFree || originalLp.varBounds[i].sign == "free") {
@@ -70,17 +78,29 @@ void WdSolve::displayResults(const LinearProgram& lp,
         }
     }
 
-    int m_orig = (int)originalLp.A.size();
-    for (int i = 0; i < m_orig; ++i) {
-        varNames.push_back(QString("w%1").arg(i + 1));
-    }
-
+    int origN_internal = varNames.size();
+    int num_w = 0;
     bool globalIsPhase1 = false;
+
     if (!modHistory.empty()) {
+        for(const auto& step : modHistory) {
+            if (step.stepName.contains("Pha 1", Qt::CaseInsensitive) ||
+                step.stepName.contains("Pha 2", Qt::CaseInsensitive)) {
+                globalIsPhase1 = true;
+                break;
+            }
+        }
+
         int n_total_vars = modHistory[0].matrix[0].size() - 1;
-        if (n_total_vars > (int)varNames.size()) {
+        num_w = n_total_vars - origN_internal;
+        if (globalIsPhase1) num_w -= 1;
+        if (num_w < 0) num_w = 0;
+
+        for (int i = 0; i < num_w; ++i) {
+            varNames.push_back(QString("w%1").arg(i + 1));
+        }
+        if (globalIsPhase1) {
             varNames.push_back("x0");
-            globalIsPhase1 = true;
         }
     }
 
@@ -91,6 +111,9 @@ void WdSolve::displayResults(const LinearProgram& lp,
     fontZ.setBold(true);
     fontZ.setPointSize(12);
     ui->lineEdit_Z->setFont(fontZ);
+
+    // Tẩy CSS header cứng để ăn theo Theme tổng
+    ui->table_solution->horizontalHeader()->setStyleSheet("");
 
     if (status == "Tối ưu" || status == "Vô số nghiệm") {
         double finalZ = optimalZ;
@@ -114,7 +137,6 @@ void WdSolve::displayResults(const LinearProgram& lp,
         }
 
         ui->table_solution->setHorizontalHeaderLabels(headers);
-        ui->table_solution->horizontalHeader()->setStyleSheet("QHeaderView::section { font-weight: bold; font-family: 'Times New Roman'; }");
         ui->table_solution->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
         ui->table_solution->verticalHeader()->setVisible(false);
 
@@ -138,7 +160,9 @@ void WdSolve::displayResults(const LinearProgram& lp,
                 if (std::abs(delta) < 1e-9) delta = 0.0;
                 QTableWidgetItem *itemDelta = new QTableWidgetItem(QString::number(delta, 'f', 4));
                 itemDelta->setTextAlignment(Qt::AlignCenter);
-                itemDelta->setBackground(QColor(240, 248, 255));
+
+                // MÀU NỀN CỘT VECTOR CHUYỂN ĐỔI THEO THEME
+                itemDelta->setBackground(QColor(isDark ? "#313244" : "#F0F8FF"));
                 ui->table_solution->setItem(i, 3, itemDelta);
             }
         }
@@ -149,7 +173,6 @@ void WdSolve::displayResults(const LinearProgram& lp,
             ui->lineEdit_Z->setText("-∞ (Không giới nội)");
         }
 
-        // BIỂU DIỄN TẬP NGHIỆM THEO HÀNG THÔNG THƯỜNG TRÊN UI CHO CẢ BIẾN x VÀ w
         if (!modHistory.empty()) {
             const SimplexStep& lastStep = modHistory.back();
             int m = (int)lastStep.matrix.size() - 1;
@@ -165,16 +188,14 @@ void WdSolve::displayResults(const LinearProgram& lp,
                 if (!isBasic) nonBasicVars.push_back(j);
             }
 
-            ui->table_solution->setRowCount(origN + m);
+            ui->table_solution->setRowCount(origN + num_w);
             ui->table_solution->setColumnCount(2);
             ui->table_solution->setHorizontalHeaderLabels({"Biến", "Phương trình (Tập nghiệm vô cực)"});
-            ui->table_solution->horizontalHeader()->setStyleSheet("QHeaderView::section { font-weight: bold; font-family: 'Times New Roman'; }");
             ui->table_solution->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
             ui->table_solution->verticalHeader()->setVisible(false);
             ui->table_solution->setShowGrid(true);
 
             int varIndexInMatrix = 0;
-            // Xử lý in phương trình cho biến gốc x
             for (int i = 0; i < origN; ++i) {
                 QString varName = QString("x%1").arg(i + 1);
                 QTableWidgetItem *itemVar = new QTableWidgetItem(varName);
@@ -206,8 +227,7 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
                     for (int j : nonBasicVars) {
                         if (j < (int)varNames.size() && varNames[j] == "x0") continue;
-
-                        double coeff = -lastStep.matrix[rowIdx][j]; // Lật dấu khi chuyển vế
+                        double coeff = -lastStep.matrix[rowIdx][j];
                         if (std::abs(coeff) >= 1e-9) {
                             if (hasTerms) {
                                 if (coeff > 0) eqStr += QString(" + %1 %2").arg(QString::number(coeff, 'f', 2), varNames[j]);
@@ -233,15 +253,13 @@ void WdSolve::displayResults(const LinearProgram& lp,
                 ui->table_solution->setItem(i, 1, itemEq);
             }
 
-            // Xử lý in phương trình cho biến phụ w
-            for (int i = 0; i < m; ++i) {
+            for (int i = 0; i < num_w; ++i) {
                 QString varName = QString("w%1").arg(i + 1);
                 QTableWidgetItem *itemVar = new QTableWidgetItem(varName);
                 itemVar->setTextAlignment(Qt::AlignCenter);
                 ui->table_solution->setItem(origN + i, 0, itemVar);
 
                 int colIdx = varIndexInMatrix + i;
-
                 int rowIdx = -1;
                 for (int r = 0; r < m; ++r) {
                     if (lastStep.currentBasicVars[r] == colIdx) { rowIdx = r; break; }
@@ -260,7 +278,6 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
                     for (int j : nonBasicVars) {
                         if (j < (int)varNames.size() && varNames[j] == "x0") continue;
-
                         double coeff = -lastStep.matrix[rowIdx][j];
                         if (std::abs(coeff) >= 1e-9) {
                             if (hasTerms) {
@@ -273,10 +290,7 @@ void WdSolve::displayResults(const LinearProgram& lp,
                             }
                         }
                     }
-
-                    if (!hasTerms) {
-                        eqStr = QString::number(rhsVal, 'f', 2);
-                    }
+                    if (!hasTerms) eqStr = QString::number(rhsVal, 'f', 2);
                     eqStr += " \u2265 0";
                 } else {
                     eqStr = "Biến tham số tùy ý \u2265 0";
@@ -309,18 +323,27 @@ void WdSolve::displayResults(const LinearProgram& lp,
     }
 
     // ---------------------------------------------------------------
-    // 2. KHU VỰC VẼ TỪ VỰNG VÀ BẢNG HTML (CÓ THỂ CHỌN 1 TRONG 2)
+    // 2. KHU VỰC VẼ TỪ VỰNG VÀ BẢNG HTML TỰ ĐỘNG CHUYỂN MÀU THEO THEME
     // ---------------------------------------------------------------
     ui->tabWidget_steps->clear();
 
     QTabWidget *vocabTabWidget = new QTabWidget();
     QTabWidget *tableTabWidget = new QTabWidget();
 
-    QString tabStyle =
-        "QTabWidget::pane { border: 1px solid #a0a0a0; background-color: #FAFAFA; top: -1px; } "
-        "QTabBar::tab { color: #333333; padding: 8px 15px; font-weight: bold; border: 1px solid #a0a0a0; border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px; background-color: #e6e6e6; } "
-        "QTabBar::tab:selected { color: #0056b3; background-color: #FAFAFA; border-top: 2px solid #0056b3; border-bottom-color: #FAFAFA; } "
-        "QTabBar::tab:!selected { margin-top: 2px; }";
+    // MÀU TAB CSS CHUYỂN ĐỔI SÁNG TỐI
+    QString bgTab = isDark ? "#181825" : "#FAFAFA";
+    QString borderColor = isDark ? "#45475A" : "#a0a0a0";
+    QString tabUnselectedBg = isDark ? "#313244" : "#e6e6e6";
+    QString tabSelectedColor = isDark ? "#89B4FA" : "#0056b3";
+    QString textColor = isDark ? "#CDD6F4" : "#333333";
+    QString hrColor = isDark ? "#CDD6F4" : "#999999";
+
+    QString tabStyle = QString(
+                           "QTabWidget::pane { border: 1px solid %1; background-color: %2; top: -1px; } "
+                           "QTabBar::tab { color: %3; padding: 8px 15px; font-weight: bold; border: 1px solid %1; border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px; background-color: %4; } "
+                           "QTabBar::tab:selected { color: %5; background-color: %2; border-top: 2px solid %5; border-bottom-color: %2; } "
+                           "QTabBar::tab:!selected { margin-top: 2px; }"
+                           ).arg(borderColor, bgTab, textColor, tabUnselectedBg, tabSelectedColor);
 
     ui->tabWidget_steps->setStyleSheet(tabStyle);
     vocabTabWidget->setStyleSheet(tabStyle);
@@ -335,7 +358,6 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
         if (step.stepName.contains("Pha 2")) isPhase1 = false;
 
-        // Chuẩn bị các chuỗi giải thích riêng biệt cho TỪ VỰNG và BẢNG
         QString vocabReadSol = "Để suy ra nghiệm, ta cho tất cả các biến không cơ sở (các biến nằm ở vế phải) bằng 0, khi đó các biến cơ sở (vế trái) sẽ nhận giá trị bằng đúng hằng số tự do của phương trình tương ứng.";
         QString tableReadSol = "Để suy ra nghiệm, ta cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở (ở cột Cơ sở) sẽ nhận giá trị bằng đúng giá trị tại cột RHS tương ứng.";
 
@@ -351,7 +373,6 @@ void WdSolve::displayResults(const LinearProgram& lp,
             tableOptZ = "Đối với hàm mục tiêu, giá trị nhỏ nhất của <b>Min Z</b> chính là giá trị tại cột RHS của dòng Z trong bảng hiện tại.";
         }
 
-        // XÂY DỰNG PHẦN GIẢI THÍCH DÙNG CHUNG BẰNG CÁC PLACEHOLDER
         QString commonIntroHtml = "";
 
         if (stepIdx == 0 && isPhase1) {
@@ -505,7 +526,6 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
         htmlVocab += QString("<p style='color: #0056b3; font-size: 14pt; font-weight: bold; margin-bottom: 8px; margin-top: 0; border-bottom: 2px solid #0056b3; padding-bottom: 4px; display: inline-block;'>%1:</p>").arg(titleStrVocab);
 
-        // Render giải thích theo ngữ cảnh Từ Vựng
         QString vocabIntroHtml = commonIntroHtml;
         vocabIntroHtml.replace("[TU_VUNG_BANG]", "từ vựng");
         vocabIntroHtml.replace("[READ_SOLUTION]", vocabReadSol);
@@ -515,7 +535,6 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
         htmlVocab += "<table align='center' cellpadding='8' cellspacing='0' style='margin-top: 10px;'>";
 
-        // Dòng 1: Hàm mục tiêu (Từ vựng)
         htmlVocab += "<tr style='font-size: 16pt; font-weight: bold;'>";
         QString zLabel;
         double zRhsVal = -step.matrix[m][n];
@@ -554,9 +573,8 @@ void WdSolve::displayResults(const LinearProgram& lp,
         htmlVocab += "</tr>";
 
         int totalCols = 3 + 3 * nonBasicVars.size();
-        htmlVocab += QString("<tr><td colspan='%1'><hr style='border: none; border-top: 1px dashed #999; margin: 5px 0;'/></td></tr>").arg(totalCols);
+        htmlVocab += QString("<tr><td colspan='%1' style='padding: 2px 0;'><hr size='1' width='100%' color='%2' noshade='noshade' style='height: 1px; border: 0; margin: 0;'></td></tr>").arg(totalCols).arg(isDark ? "#FFFFFF" : "#999999");
 
-        // Các dòng Ràng buộc biến cơ sở (Từ vựng)
         for (int i = 0; i < m; ++i) {
             htmlVocab += "<tr style='font-size: 15pt;'>";
             int basicVarIndex = step.currentBasicVars[i];
@@ -588,12 +606,6 @@ void WdSolve::displayResults(const LinearProgram& lp,
         }
         htmlVocab += "</table></body></html>";
 
-        QTextEdit *textEditVocab = new QTextEdit();
-        textEditVocab->setReadOnly(true);
-        textEditVocab->setStyleSheet("QTextEdit { font-family: 'Times New Roman', serif; padding: 20px; border: none; background-color: #FAFAFA; color: #333333;}");
-        textEditVocab->setHtml(htmlVocab);
-        vocabTabWidget->addTab(textEditVocab, step.stepName);
-
 
         // --- 2.3 RÁP HTML CHO TAB "DẠNG BẢNG" ---
         QString htmlTable = "<html><body style='font-family: \"Times New Roman\", serif; margin: 0; padding: 0; color: #333333;'>";
@@ -602,7 +614,6 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
         htmlTable += QString("<p style='color: #0056b3; font-size: 14pt; font-weight: bold; margin-bottom: 8px; margin-top: 0; border-bottom: 2px solid #0056b3; padding-bottom: 4px; display: inline-block;'>%1:</p>").arg(titleStrTable);
 
-        // Render giải thích theo ngữ cảnh Bảng
         QString tableIntroHtml = commonIntroHtml;
         tableIntroHtml.replace("[TU_VUNG_BANG]", "bảng");
         tableIntroHtml.replace("[READ_SOLUTION]", tableReadSol);
@@ -612,18 +623,16 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
         htmlTable += "<table width='100%' border='1' cellspacing='0' cellpadding='10' style='border-collapse: collapse; text-align: center; border: 1px solid #aaa; margin-top: 15px;'>";
 
-        // Header Bảng
         htmlTable += "<tr style='background-color: #e6f2ff; font-weight: bold; font-size: 15pt;'>";
         htmlTable += "<td>Cơ sở</td>";
         for (int j = 0; j < n; ++j) {
             QString vName = (j < (int)varNames.size()) ? varNames[j] : QString("x%1").arg(j);
-            if (!isPhase1 && vName == "x0") continue; // Ẩn cột x0 ở pha 2
+            if (!isPhase1 && vName == "x0") continue;
             htmlTable += QString("<td>%1</td>").arg(vName);
         }
         htmlTable += "<td>RHS</td>";
         htmlTable += "</tr>";
 
-        // Các dòng ràng buộc (Bảng)
         for (int i = 0; i < m; ++i) {
             htmlTable += "<tr style='font-size: 15pt;'>";
             int basicVarIndex = step.currentBasicVars[i];
@@ -635,7 +644,7 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
             for (int j = 0; j < n; ++j) {
                 QString vName = (j < (int)varNames.size()) ? varNames[j] : "";
-                if (!isPhase1 && vName == "x0") continue; // Ẩn giá trị cột x0 ở pha 2
+                if (!isPhase1 && vName == "x0") continue;
 
                 double val = step.matrix[i][j];
                 if (std::abs(val) < 1e-9) val = 0.0;
@@ -652,7 +661,6 @@ void WdSolve::displayResults(const LinearProgram& lp,
             htmlTable += "</tr>";
         }
 
-        // Dòng Z (Bảng)
         htmlTable += "<tr style='background-color: #fff3cd; font-weight: bold; font-size: 15pt;'>";
         QString zLabelTable;
         if (isPhase1) zLabelTable = "&xi;";
@@ -661,9 +669,8 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
         for (int j = 0; j < n; ++j) {
             QString vName = (j < (int)varNames.size()) ? varNames[j] : "";
-            if (!isPhase1 && vName == "x0") continue; // Ẩn giá trị Z của cột x0 ở pha 2
+            if (!isPhase1 && vName == "x0") continue;
 
-            // [ĐÃ SỬA]: Đảo dấu hệ số (âm) cho dòng Z ở Dạng Bảng để phù hợp với việc chuyển vế
             double val = -step.matrix[m][j];
             if (std::abs(val) < 1e-9) val = 0.0;
 
@@ -674,17 +681,57 @@ void WdSolve::displayResults(const LinearProgram& lp,
             }
         }
 
-        // [ĐÃ SỬA]: Đảo dấu RHS cho dòng Z ở Dạng Bảng để phù hợp với việc chuyển vế
         double valZRhs = -step.matrix[m][n];
         if (std::abs(valZRhs) < 1e-9) valZRhs = 0.0;
         htmlTable += QString("<td><b>%1</b></td>").arg(QString::number(valZRhs, 'f', 2));
         htmlTable += "</tr>";
-
         htmlTable += "</table></body></html>";
+
+        // =======================================================================
+        // ÁP DỤNG DARK MODE LÊN MÃ NGUỒN HTML
+        // Thay thế toàn bộ mã màu cứng thành mã màu tối tương ứng
+        // =======================================================================
+        if (isDark) {
+            htmlVocab.replace("color: #333333", "color: #CDD6F4");
+            htmlVocab.replace("color: #d9534f", "color: #F38BA8");
+            htmlVocab.replace("color: #0056b3", "color: #89B4FA");
+            htmlVocab.replace("border-bottom: 2px solid #0056b3", "border-bottom: 2px solid #89B4FA");
+            htmlVocab.replace("color='green'", "color='#A6E3A1'");
+            htmlVocab.replace("color='red'", "color='#F38BA8'");
+            htmlVocab.replace("background-color: #f0fdf4", "background-color: #1e3a29");
+            htmlVocab.replace("border-left: 4px solid #28a745", "border-left: 4px solid #A6E3A1");
+            htmlVocab.replace("color: #28a745", "color: #A6E3A1");
+            htmlVocab.replace("background-color: #e6f2ff", "background-color: #1e293b");
+            htmlVocab.replace("border-left: 4px solid #0056b3", "border-left: 4px solid #89B4FA");
+            htmlVocab.replace("border-top: 1px dashed #999", "border-top: 1px dashed #45475A");
+
+            htmlTable.replace("color: #333333", "color: #CDD6F4");
+            htmlTable.replace("color: #d9534f", "color: #F38BA8");
+            htmlTable.replace("color: #0056b3", "color: #89B4FA");
+            htmlTable.replace("border-bottom: 2px solid #0056b3", "border-bottom: 2px solid #89B4FA");
+            htmlTable.replace("color='green'", "color='#A6E3A1'");
+            htmlTable.replace("color='red'", "color='#F38BA8'");
+            htmlTable.replace("background-color: #f0fdf4", "background-color: #1e3a29");
+            htmlTable.replace("border-left: 4px solid #28a745", "border-left: 4px solid #A6E3A1");
+            htmlTable.replace("color: #28a745", "color: #A6E3A1");
+            htmlTable.replace("background-color: #e6f2ff", "background-color: #1e293b");
+            htmlTable.replace("border-left: 4px solid #0056b3", "border-left: 4px solid #89B4FA");
+            htmlTable.replace("border: 1px solid #aaa", "border: 1px solid #45475A");
+            htmlTable.replace("background-color: #d4edda", "background-color: #2d4a22");
+            htmlTable.replace("color: #155724", "color: #A6E3A1");
+            htmlTable.replace("background-color: #fff3cd", "background-color: #454224");
+        }
+
+        QTextEdit *textEditVocab = new QTextEdit();
+        textEditVocab->setReadOnly(true);
+        textEditVocab->setStyleSheet(QString("QTextEdit { font-family: 'Times New Roman', serif; padding: 20px; border: none; background-color: %1; }").arg(isDark ? "#181825" : "#FAFAFA"));
+        textEditVocab->setHtml(htmlVocab);
+        vocabTabWidget->addTab(textEditVocab, step.stepName);
+
 
         QTextEdit *textEditTable = new QTextEdit();
         textEditTable->setReadOnly(true);
-        textEditTable->setStyleSheet("QTextEdit { font-family: 'Times New Roman', serif; padding: 20px; border: none; background-color: #FAFAFA; color: #333333;}");
+        textEditTable->setStyleSheet(QString("QTextEdit { font-family: 'Times New Roman', serif; padding: 20px; border: none; background-color: %1; }").arg(isDark ? "#181825" : "#FAFAFA"));
         textEditTable->setHtml(htmlTable);
 
         QString tabNameTable = step.stepName;
@@ -709,7 +756,6 @@ void WdSolve::on_pushButton_clicked()
     if (this->parentWidget()) {
         this->parentWidget()->show();
     }
-    // Dùng hide() để cửa sổ WdSolve không bị hủy, bảo tồn dữ liệu cho lần gọi tiếp theo
     this->hide();
 }
 
@@ -719,10 +765,8 @@ void WdSolve::on_pushButton_clicked()
 void WdSolve::on_pushButton_2_clicked()
 {
     if (this->currentOriginalLp.c.size() == 2) {
-        // Chỉ tạo mới instance nếu nó chưa tồn tại (Singleton)
         if (!this->wd_show) {
             this->wd_show = new WdShowImage(this);
-            // Không set thuộc tính DeleteOnClose để giữ cửa sổ tồn tại
         }
 
         this->wd_show->drawGraph(currentLp, currentOriginalLp,
@@ -783,10 +827,8 @@ void WdSolve::on_pushButton_3_clicked()
     contextString += "QUAN TRỌNG: Nếu người dùng hỏi bất kỳ câu hỏi ngoài lề (không thuộc phạm vi của bài toán hoặc quy hoạch tuyến tính), bạn KHÔNG ĐƯỢC trả lời nội dung đó. Bạn BẮT BUỘC phải trả lời chính xác bằng câu sau và không giải thích gì thêm:\n";
     contextString += "\"Xin lỗi câu hỏi của bạn không thuộc phạm vi của bài toán\"";
 
-    // Chỉ tạo mới instance nếu nó chưa tồn tại (Singleton)
     if (!this->wd_ChatBot) {
         this->wd_ChatBot = new WdChatBot(this);
-        // Không set thuộc tính DeleteOnClose
     }
 
     this->wd_ChatBot->setProblemContext(contextString);

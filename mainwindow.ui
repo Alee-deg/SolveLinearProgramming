@@ -29,56 +29,7 @@
   </property>
   <widget class="QWidget" name="centralwidget">
    <property name="styleSheet">
-    <string notr="true">/* 1. NỀN TOÀN BỘ ỨNG DỤNG (Xóa nền xám, thay bằng nền trắng xám hiện đại) */
-QWidget#centralwidget {
-    background-color: #F5F7FA; /* Màu trắng Slate cực sang */
-}
-
-/* 2. TIÊU ĐỀ CHÍNH */
-QLabel#lblTieuDe {
-    font-family: &quot;Segoe UI&quot;, Arial, sans-serif;
-    font-size: 32px;
-    font-weight: 900;
-    color: #0f172a; /* Màu xanh đen */
-    /* Bỏ gạch chân và in nghiêng cũ đi */
-    text-decoration: none; 
-    font-style: normal;
-}
-
-/* 3. NÚT BẮT ĐẦU (Nút chính - Nổi bật nhất) */
-QPushButton#pushButton_3 {
-    background-color: #004080; /* Màu xanh dương đậm (Tone sur tone với logo KHTN) */
-    color: white;
-    font-family: &quot;Segoe UI&quot;, Arial, sans-serif;
-    font-size: 16px;
-    font-weight: bold;
-    border: none;
-    border-radius: 25px; /* Bo góc tròn hẳn dạng viên thuốc (Pill shape) */
-    padding: 12px 40px;
-}
-QPushButton#pushButton_3:hover {
-    background-color: #0059b3; /* Sáng lên khi di chuột vào */
-}
-QPushButton#pushButton_3:pressed {
-    background-color: #00264d; /* Đậm đi khi click */
-}
-
-/* 4. CÁC NÚT PHỤ (Giới thiệu, Chính sách - Dạng Ghost Button) */
-QPushButton#btnGioiThieu, QPushButton#btnChinhSach {
-    background-color: transparent; /* Nền trong suốt */
-    color: #475569; /* Chữ màu xám */
-    font-family: &quot;Segoe UI&quot;, Arial, sans-serif;
-    font-size: 14px;
-    font-weight: bold;
-    border: 2px solid #cbd5e1; /* Viền xám nhạt */
-    border-radius: 8px; /* Bo góc nhẹ */
-    padding: 8px 24px;
-}
-QPushButton#btnGioiThieu:hover, QPushButton#btnChinhSach:hover {
-    background-color: #f1f5f9; /* Hiện nền mờ khi di chuột */
-    color: #0f172a;
-    border-color: #94a3b8;
-}</string>
+    <string notr="true"/>
    </property>
    <layout class="QVBoxLayout" name="verticalLayout_2">
     <item>

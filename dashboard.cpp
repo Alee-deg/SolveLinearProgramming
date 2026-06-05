@@ -15,16 +15,146 @@
 #include <QRegularExpressionValidator>
 #include <QRegularExpression>
 #include <QWheelEvent>
+#include <deque>
+
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QDir>
+#include <QListWidget>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QDateTime>
+#include <QSettings>
+
+// =======================================================================
+// Cấu trúc bọc bài toán kèm theo thời gian giải
+// =======================================================================
+struct HistoryEntry {
+    LinearProgram lp;
+    QDateTime timestamp;
+};
+
+static std::deque<HistoryEntry> g_undoStack;
+
+static void saveHistoryToJson() {
+    QJsonArray historyArray;
+    for (const auto& entry : g_undoStack) {
+        QJsonObject obj;
+        obj["timestamp"] = entry.timestamp.toString(Qt::ISODate);
+
+        const LinearProgram& lp = entry.lp;
+        obj["algoType"] = lp.algoType;
+        obj["isMaximize"] = lp.isMaximize;
+        obj["c_0"] = lp.c_0;
+
+        QJsonArray cArr; for (double val : lp.c) cArr.append(val);
+        obj["c"] = cArr;
+
+        QJsonArray aArr;
+        for (const auto& row : lp.A) {
+            QJsonArray rowArr; for (double val : row) rowArr.append(val);
+            aArr.append(rowArr);
+        }
+        obj["A"] = aArr;
+
+        QJsonArray signArr; for (const QString& s : lp.signs) signArr.append(s);
+        obj["signs"] = signArr;
+
+        QJsonArray bArr; for (double val : lp.b) bArr.append(val);
+        obj["b"] = bArr;
+
+        QJsonArray boundsArr;
+        for (const auto& vb : lp.varBounds) {
+            QJsonObject vbObj;
+            vbObj["sign"] = vb.sign;
+            vbObj["isFree"] = vb.isFree;
+            vbObj["value"] = vb.value;
+            boundsArr.append(vbObj);
+        }
+        obj["varBounds"] = boundsArr;
+
+        historyArray.append(obj);
+    }
+
+    QString filePath = QCoreApplication::applicationDirPath() + "/history.json";
+    QFile file(filePath);
+    if (file.open(QIODevice::WriteOnly)) {
+        QJsonDocument doc(historyArray);
+        file.write(doc.toJson());
+        file.close();
+    }
+}
+
+static void loadHistoryFromJson() {
+    QString filePath = QCoreApplication::applicationDirPath() + "/history.json";
+    QFile file(filePath);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly)) return;
+
+    QByteArray data = file.readAll();
+    file.close();
+
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (!doc.isArray()) return;
+
+    g_undoStack.clear();
+    QJsonArray historyArray = doc.array();
+    for (int i = 0; i < historyArray.size(); ++i) {
+        QJsonObject obj = historyArray[i].toObject();
+        HistoryEntry entry;
+
+        if (obj.contains("timestamp")) {
+            entry.timestamp = QDateTime::fromString(obj["timestamp"].toString(), Qt::ISODate);
+        } else {
+            entry.timestamp = QDateTime::currentDateTime();
+        }
+
+        LinearProgram lp;
+        lp.algoType = obj["algoType"].toInt();
+        lp.isMaximize = obj["isMaximize"].toBool();
+        lp.c_0 = obj["c_0"].toDouble();
+
+        QJsonArray cArr = obj["c"].toArray();
+        for (int j = 0; j < cArr.size(); ++j) lp.c.push_back(cArr[j].toDouble());
+
+        QJsonArray aArr = obj["A"].toArray();
+        for (int j = 0; j < aArr.size(); ++j) {
+            QJsonArray rowArr = aArr[j].toArray();
+            std::vector<double> row;
+            for (int k = 0; k < rowArr.size(); ++k) row.push_back(rowArr[k].toDouble());
+            lp.A.push_back(row);
+        }
+
+        QJsonArray signArr = obj["signs"].toArray();
+        for (int j = 0; j < signArr.size(); ++j) lp.signs.push_back(signArr[j].toString());
+
+        QJsonArray bArr = obj["b"].toArray();
+        for (int j = 0; j < bArr.size(); ++j) lp.b.push_back(bArr[j].toDouble());
+
+        QJsonArray boundsArr = obj["varBounds"].toArray();
+        for (int j = 0; j < boundsArr.size(); ++j) {
+            QJsonObject vbObj = boundsArr[j].toObject();
+            VarBound vb;
+            vb.sign = vbObj["sign"].toString();
+            vb.isFree = vbObj["isFree"].toBool();
+            vb.value = vbObj["value"].toDouble();
+            lp.varBounds.push_back(vb);
+        }
+
+        entry.lp = lp;
+        g_undoStack.push_back(entry);
+    }
+}
 
 // -----------------------------------------------------------------------
 // [BẢN MAX LEVEL] Ô nhập liệu thông minh Algebraic Parser
-// Hỗ trợ: Cộng, Trừ, Nhân, Chia, Lũy thừa, Ngoặc đơn, Căn số, Pi, E
 // -----------------------------------------------------------------------
 class MathInput : public QLineEdit {
 public:
     explicit MathInput(QWidget *parent = nullptr) : QLineEdit(parent) {}
 
-    // Bộ máy dịch Toán học chuẩn Cây Cú Pháp (AST)
     double parseMath(QString s) const {
         s = s.trimmed().toLower();
         s.remove(' ');
@@ -111,7 +241,6 @@ public:
                 }
             }
         }
-
         return 0.0;
     }
 
@@ -129,10 +258,8 @@ protected:
         QTimer::singleShot(0, this, [this](){ this->selectAll(); });
     }
 
-    // [ĐÃ THÊM MỚI] Sự kiện khi người dùng nhập xong và chuyển sang ô khác
     void focusOutEvent(QFocusEvent *event) override {
         QLineEdit::focusOutEvent(event);
-        // Tự động tính toán (nếu gõ biểu thức) và bọc lại đúng 2 chữ số thập phân
         this->setValue(this->value());
     }
 
@@ -150,6 +277,10 @@ Dashboard::Dashboard(QWidget *parent)
     , ui(new Ui::Dashboard)
 {
     ui->setupUi(this);
+
+    // Tự động tải lịch sử lên khi khởi động
+    loadHistoryFromJson();
+
     ui->matrix->hide();
     ui->table_functionTarget->hide();
     ui->label_3->hide();
@@ -160,25 +291,240 @@ Dashboard::Dashboard(QWidget *parent)
     this->setWindowIcon(QIcon(":/logo.png"));
 
     this->wd_solve = nullptr;
-
-    // Chỉ thay đổi dòng này: Set màu nền F5F7FA cho QMainWindow
-    this->setStyleSheet(
-        "#centralwidget { background-color: #F5F7FA; }" /* Ép màu nền xám dịu cho toàn bộ khu vực chính */
-        "QWidget { font-family: 'Times New Roman'; font-size: 14pt; color: #333333; }"
-        "QTableWidget { background-color: #FFFFFF; border: 1px solid #CCCCCC; }" /* Bảng vẫn giữ nền trắng để phần nhập liệu nổi bật */
-        "QHeaderView::section { background-color: #E4E7EB; font-weight: bold; border: 1px solid #C0C0C0; padding: 4px; }"
-        );
-
-    QString headerStyle =
-        "QHeaderView::section { background-color: #E8E8E8; font-weight: bold; "
-        "border: 1px solid #C0C0C0; padding: 4px; }";
-    ui->table_functionTarget->horizontalHeader()->setStyleSheet(headerStyle);
-    ui->matrix->horizontalHeader()->setStyleSheet(headerStyle);
-    ui->table_varConstraint->horizontalHeader()->setStyleSheet(headerStyle);
-    ui->table_varConstraint->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-
     this->setWindowTitle("Nhập liệu");
     this->setWindowState(Qt::WindowMaximized);
+
+    // =======================================================================
+    // MỞ CỬA SỔ CHỌN BÀI TOÁN KHI BẤM NÚT UNDO/LỊCH SỬ
+    // =======================================================================
+    QPushButton *btnUndo = this->findChild<QPushButton*>("btn_Undo");
+    if (!btnUndo) {
+        for (QPushButton *btn : this->findChildren<QPushButton*>()) {
+            if (btn->text().contains("Quay lại") || btn->text().contains("Khôi phục") || btn->text() == "Undo" || btn->text().contains("Lịch sử")) {
+                btnUndo = btn;
+                break;
+            }
+        }
+    }
+
+    if (btnUndo) {
+        connect(btnUndo, &QPushButton::clicked, this, [this]() {
+            if (g_undoStack.empty()) {
+                QMessageBox::information(this, "Thông báo", "Lịch sử trống! Bạn chưa giải bài toán nào.");
+                return;
+            }
+
+            QDialog historyDialog(this);
+            historyDialog.setWindowTitle("Lịch sử giải bài toán");
+            historyDialog.resize(600, 450);
+
+            // =======================================================================
+            // [FIX MỚI] ĐỌC SETTINGS VÀ ÉP CỨNG GIAO DIỆN LỊCH SỬ
+            // =======================================================================
+            QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+            bool isDark = settings.value("dark_mode", false).toBool();
+
+            if (isDark) {
+                historyDialog.setStyleSheet(
+                    "QDialog { background-color: #1E1E2E; }"
+                    "QLabel { color: #CDD6F4; }"
+                    "QListWidget { background-color: #181825; color: #CDD6F4; border: 1px solid #45475A; border-radius: 4px; outline: none; }"
+                    "QListWidget::item { padding: 12px; border-bottom: 1px solid #313244; }"
+                    "QListWidget::item:selected { background-color: #313244; color: #89B4FA; font-weight: bold; }"
+                    );
+            } else {
+                historyDialog.setStyleSheet(
+                    "QDialog { background-color: #F5F7FA; }"
+                    "QLabel { color: #333333; }"
+                    "QListWidget { background-color: #FFFFFF; color: #333333; border: 1px solid #CCCCCC; border-radius: 4px; outline: none; }"
+                    "QListWidget::item { padding: 12px; border-bottom: 1px solid #EEEEEE; }"
+                    "QListWidget::item:selected { background-color: #E6F0FA; color: #0056b3; font-weight: bold; }"
+                    );
+            }
+
+            QVBoxLayout *layout = new QVBoxLayout(&historyDialog);
+            QLabel *lblTitle = new QLabel("Chọn một bài toán cũ để tải lại:", &historyDialog);
+            lblTitle->setStyleSheet("font-weight: bold; font-size: 13pt; margin-bottom: 5px;");
+            layout->addWidget(lblTitle);
+
+            QListWidget *listWidget = new QListWidget(&historyDialog);
+            QString currentDateStr = "";
+
+            for (int i = (int)g_undoStack.size() - 1; i >= 0; --i) {
+                const HistoryEntry& entry = g_undoStack[i];
+                const LinearProgram& lp_item = entry.lp;
+
+                QString itemDate = entry.timestamp.date().toString("dd/MM/yyyy");
+                QString itemTime = entry.timestamp.time().toString("HH:mm:ss");
+
+                if (itemDate != currentDateStr) {
+                    QListWidgetItem *dateHeader = new QListWidgetItem("📅 Ngày: " + itemDate);
+                    QFont f = dateHeader->font();
+                    f.setBold(true);
+                    dateHeader->setFont(f);
+                    dateHeader->setFlags(dateHeader->flags() & ~Qt::ItemIsSelectable);
+                    dateHeader->setData(Qt::UserRole, -1);
+
+                    // Gán màu tĩnh cho Header Ngày tháng tùy chế độ
+                    if (isDark) {
+                        dateHeader->setBackground(QColor("#313244"));
+                        dateHeader->setForeground(QColor("#A6ADC8"));
+                    } else {
+                        dateHeader->setBackground(QColor("#E4E7EB"));
+                        dateHeader->setForeground(QColor("#333333"));
+                    }
+
+                    listWidget->addItem(dateHeader);
+                    currentDateStr = itemDate;
+                }
+
+                QString optStr = lp_item.isMaximize ? "Max Z =" : "Min Z =";
+                int vars = lp_item.c.size();
+                int constraints = lp_item.A.size();
+
+                QString zExpr = "";
+                bool isFirst = true;
+                if (std::abs(lp_item.c_0) > 1e-9) {
+                    zExpr += QString::number(lp_item.c_0, 'g', 4);
+                    isFirst = false;
+                }
+                for (size_t j = 0; j < lp_item.c.size(); ++j) {
+                    double val = lp_item.c[j];
+                    if (std::abs(val) > 1e-9) {
+                        if (!isFirst) {
+                            zExpr += (val > 0) ? " + " : " - ";
+                        } else {
+                            if (val < 0) zExpr += "-";
+                        }
+                        zExpr += QString::number(std::abs(val), 'g', 4) + "x" + QString::number(j + 1);
+                        isFirst = false;
+                    }
+                }
+                if (zExpr.isEmpty()) zExpr = "0";
+
+                QString desc = QString("   ▶ [%1] : [%2 %3] | %4 Biến, %5 Ràng buộc")
+                                   .arg(itemTime).arg(optStr).arg(zExpr).arg(vars).arg(constraints);
+
+                QListWidgetItem *item = new QListWidgetItem(desc);
+                item->setData(Qt::UserRole, i);
+                listWidget->addItem(item);
+            }
+
+            for(int i = 0; i < listWidget->count(); ++i) {
+                if (listWidget->item(i)->data(Qt::UserRole).toInt() != -1) {
+                    listWidget->setCurrentRow(i);
+                    break;
+                }
+            }
+            layout->addWidget(listWidget);
+
+            QHBoxLayout *btnLayout = new QHBoxLayout();
+            QPushButton *btnRestore = new QPushButton("Tải lại dữ liệu", &historyDialog);
+            QPushButton *btnCancel = new QPushButton("Hủy bỏ", &historyDialog);
+
+            // Gán màu tĩnh cho Nút bấm tùy chế độ
+            if (isDark) {
+                btnCancel->setStyleSheet("QPushButton { background-color: #313244; color: #CDD6F4; border: 1px solid #45475A; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #45475A; }");
+                btnRestore->setStyleSheet("QPushButton { background-color: #89B4FA; color: #1E1E2E; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #B4BEFE; }");
+            } else {
+                btnCancel->setStyleSheet("QPushButton { background-color: #FFFFFF; color: #4B5563; border: 1px solid #D1D5DB; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #F3F4F6; }");
+                btnRestore->setStyleSheet("QPushButton { background-color: #0078D7; color: #FFFFFF; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #005A9E; }");
+            }
+
+            btnCancel->setCursor(Qt::PointingHandCursor);
+            btnRestore->setCursor(Qt::PointingHandCursor);
+
+            btnLayout->addStretch();
+            btnLayout->addWidget(btnCancel);
+            btnLayout->addWidget(btnRestore);
+            layout->addLayout(btnLayout);
+
+            connect(btnCancel, &QPushButton::clicked, &historyDialog, &QDialog::reject);
+
+            auto handleRestore = [&historyDialog, listWidget]() {
+                QListWidgetItem *selectedItem = listWidget->currentItem();
+                if (selectedItem && selectedItem->data(Qt::UserRole).toInt() != -1) {
+                    historyDialog.accept();
+                }
+            };
+            connect(btnRestore, &QPushButton::clicked, &historyDialog, handleRestore);
+            connect(listWidget, &QListWidget::itemDoubleClicked, &historyDialog, handleRestore);
+
+            if (historyDialog.exec() == QDialog::Accepted) {
+                QListWidgetItem *selectedItem = listWidget->currentItem();
+                if (!selectedItem) return;
+
+                int realIndex = selectedItem->data(Qt::UserRole).toInt();
+                if (realIndex == -1) return;
+
+                LinearProgram lp = g_undoStack[realIndex].lp;
+
+                // --- BẮT ĐẦU QUÁ TRÌNH KHÔI PHỤC LÊN GIAO DIỆN CHÍNH ---
+                int n = lp.c.size();
+                int m = lp.A.size();
+
+                ui->spinBox->setValue(n);
+                ui->spinBox_2->setValue(m);
+
+                this->setupConstraintsTable(m, n);
+                this->setupVariableConstraints(n);
+                this->setupObjectiveFunctionTable(n);
+
+                ui->label_3->show();
+                ui->label_4->show();
+                ui->label_5->show();
+                ui->table_functionTarget->show();
+                ui->table_varConstraint->show();
+                ui->matrix->show();
+                ui->max_min->show();
+
+                ui->comboAlgorithm->setCurrentIndex(lp.algoType);
+                ui->max_min->setCurrentText(lp.isMaximize ? "Max" : "Min");
+
+                auto *spinC0 = dynamic_cast<MathInput*>(ui->table_functionTarget->cellWidget(0, 0));
+                if (spinC0) spinC0->setValue(lp.c_0);
+                for (int j = 0; j < n; ++j) {
+                    auto *spinC = dynamic_cast<MathInput*>(ui->table_functionTarget->cellWidget(0, j + 1));
+                    if (spinC) spinC->setValue(lp.c[j]);
+                }
+
+                for (int i = 0; i < m; ++i) {
+                    for (int j = 0; j < n; ++j) {
+                        auto *spinA = dynamic_cast<MathInput*>(ui->matrix->cellWidget(i, j));
+                        if (spinA) spinA->setValue(lp.A[i][j]);
+                    }
+                    auto *comboSign = qobject_cast<QComboBox*>(ui->matrix->cellWidget(i, n));
+                    if (comboSign && i < (int)lp.signs.size()) {
+                        comboSign->setCurrentText(lp.signs[i]);
+                    }
+                    auto *spinB = dynamic_cast<MathInput*>(ui->matrix->cellWidget(i, n + 1));
+                    if (spinB && i < (int)lp.b.size()) {
+                        spinB->setValue(lp.b[i]);
+                    }
+                }
+
+                for (int i = 0; i < n; ++i) {
+                    if (i < (int)lp.varBounds.size()) {
+                        auto *comboVarSign = qobject_cast<QComboBox*>(ui->table_varConstraint->cellWidget(i, 1));
+                        if (comboVarSign) comboVarSign->setCurrentText(lp.varBounds[i].sign);
+
+                        auto *spinVarVal = dynamic_cast<MathInput*>(ui->table_varConstraint->cellWidget(i, 2));
+                        if (spinVarVal) {
+                            if (lp.varBounds[i].sign == "free" || lp.varBounds[i].isFree) {
+                                spinVarVal->setValue(0.0);
+                                spinVarVal->setEnabled(false);
+                            } else {
+                                spinVarVal->setEnabled(true);
+                                spinVarVal->setValue(lp.varBounds[i].value);
+                            }
+                        }
+                    }
+                }
+
+                QMessageBox::information(this, "Tải thành công", "Đã nạp lại dữ liệu bài toán từ Lịch sử!");
+            }
+        });
+    }
 }
 
 Dashboard::~Dashboard()
@@ -186,13 +532,11 @@ Dashboard::~Dashboard()
     delete ui;
 }
 
+// KHÔNG DÙNG setStyleSheet Ở ĐÂY NỮA, ĐỂ CHÚNG TỰ ĂN THEO CSS CỦA MAINWINDOW
 MathInput* Dashboard::createSpinBox(QWidget *parent) {
     MathInput *input = new MathInput(parent);
     input->setValue(0.0);
     input->setAlignment(Qt::AlignCenter);
-    input->setStyleSheet(
-        "QLineEdit { border: none; background: transparent; }"
-        "QLineEdit:focus { border: 1px solid #0078D7; background: white; }");
 
     QString mathPattern = R"(^[0-9.pieqsrto\s+\-*/^()]*$)";
     QRegularExpression rx(mathPattern, QRegularExpression::CaseInsensitiveOption);
@@ -261,9 +605,6 @@ void Dashboard::setupConstraintsTable(int m, int n) {
 
         QComboBox *comboSign = new QComboBox();
         comboSign->addItems({"<=", "=", ">="});
-        comboSign->setStyleSheet(
-            "QComboBox { border: none; background: transparent; }"
-            "QComboBox:focus { border: 1px solid #0078D7; background: white; }");
         if (row < oldM) {
             int idx = comboSign->findText(oldSigns[row]);
             if (idx >= 0) comboSign->setCurrentIndex(idx);
@@ -303,9 +644,6 @@ void Dashboard::setupVariableConstraints(int n) {
 
         QComboBox *comboSign = new QComboBox();
         comboSign->addItems({">=", "<=", "free"});
-        comboSign->setStyleSheet(
-            "QComboBox { border: none; background: transparent; }"
-            "QComboBox:focus { border: 1px solid #0078D7; background: white; }");
         if (i < oldN) {
             int idx = comboSign->findText(oldSigns[i]);
             if (idx >= 0) comboSign->setCurrentIndex(idx);
@@ -314,10 +652,8 @@ void Dashboard::setupVariableConstraints(int n) {
 
         MathInput *spinBox = createSpinBox();
         spinBox->setReadOnly(true);
-        spinBox->setEnabled(false); // Khóa cứng
-        spinBox->setStyleSheet("background-color: #E8E8E8; border: none;"); // Bôi xám để hiển thị trạng thái bị khóa
-
-        spinBox->setValue(0.0); // Ép về 0.0 vì chỉ cho chọn dấu
+        spinBox->setEnabled(false);
+        spinBox->setValue(0.0);
         ui->table_varConstraint->setCellWidget(i, 2, spinBox);
 
         connect(comboSign, &QComboBox::currentTextChanged,
@@ -387,8 +723,6 @@ void Dashboard::on_pushButton_3_clicked()
     local_lp.isMaximize = (ui->max_min->currentText() != "Min");
     this->getDataFromWd(local_lp);
 
-    LinearProgram originalLp = local_lp;
-
     SimplexSolver solver(local_lp);
     solver.solve();
 
@@ -403,6 +737,17 @@ void Dashboard::on_pushButton_3_clicked()
         return;
     }
 
+    HistoryEntry newEntry;
+    newEntry.lp = local_lp;
+    newEntry.timestamp = QDateTime::currentDateTime();
+
+    if (g_undoStack.size() >= 10000) {
+        g_undoStack.pop_front();
+    }
+    g_undoStack.push_back(newEntry);
+    saveHistoryToJson();
+
+    LinearProgram originalLp = local_lp;
     if (!this->wd_solve) {
         this->wd_solve = new WdSolve(this);
     }
@@ -510,7 +855,7 @@ void Dashboard::on_pushButton_5_clicked()
         auto *sp = dynamic_cast<MathInput*>(ui->table_varConstraint->cellWidget(i, 2));
         if (sp) {
             sp->setValue(0.0);
-            sp->setEnabled(false); // Cập nhật để tiếp tục giữ trạng thái khóa khi bấm Reset
+            sp->setEnabled(false);
         }
     }
 }
@@ -521,10 +866,17 @@ void Dashboard::on_btn_HuongDan_clicked()
     dialog.setWindowTitle("Hướng dẫn sử dụng");
     dialog.resize(800, 620);
 
-    dialog.setStyleSheet(
-        "QDialog { background-color: #1E1E2E; }"
-        "QLabel { color: #CDD6F4; }"
-        );
+    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    bool isDark = settings.value("dark_mode", false).toBool();
+
+    // =======================================================================
+    // [FIX] BẤT CHẤP HỆ THỐNG UBUNTU, ÉP CỨNG MÀU NỀN CỦA DIALOG VÀ SCROLL AREA
+    // =======================================================================
+    if (isDark) {
+        dialog.setStyleSheet("QDialog, QScrollArea, QWidget#scrollAreaWidgetContents { background-color: #1E1E2E; border: none; }");
+    } else {
+        dialog.setStyleSheet("QDialog, QScrollArea, QWidget#scrollAreaWidgetContents { background-color: #F5F7FA; border: none; }");
+    }
 
     QVBoxLayout *mainLayout = new QVBoxLayout(&dialog);
     mainLayout->setContentsMargins(30, 25, 30, 25);
@@ -532,18 +884,19 @@ void Dashboard::on_btn_HuongDan_clicked()
 
     QLabel *titleLabel = new QLabel("HƯỚNG DẪN SỬ DỤNG PHẦN MỀM");
     titleLabel->setAlignment(Qt::AlignCenter);
-    titleLabel->setStyleSheet("color: #89B4FA; font-size: 22px; font-weight: bold; letter-spacing: 1px;");
+    titleLabel->setStyleSheet(isDark ? "color: #89B4FA; font-size: 22px; font-weight: bold; letter-spacing: 1px;"
+                                     : "color: #0078D7; font-size: 22px; font-weight: bold; letter-spacing: 1px;");
     mainLayout->addWidget(titleLabel);
 
     QFrame *line = new QFrame(&dialog);
     line->setFrameShape(QFrame::HLine);
-    line->setStyleSheet("background-color: #313244; max-height: 1px; margin-bottom: 5px; border: none;");
+    line->setStyleSheet(isDark ? "background-color: #45475A; max-height: 1px; margin-bottom: 5px; border: none;"
+                               : "background-color: #DDDDDD; max-height: 1px; margin-bottom: 5px; border: none;");
     mainLayout->addWidget(line);
 
     QScrollArea *scrollArea = new QScrollArea(&dialog);
     scrollArea->setWidgetResizable(true);
     scrollArea->setFrameShape(QFrame::NoFrame);
-    scrollArea->setStyleSheet("QScrollArea { background: transparent; } QWidget#scrollAreaWidgetContents { background: transparent; }");
 
     QWidget *scrollContent = new QWidget();
     scrollContent->setObjectName("scrollAreaWidgetContents");
@@ -559,40 +912,49 @@ void Dashboard::on_btn_HuongDan_clicked()
     QString guideText = R"(
         <p style="margin-bottom: 12px;"><b>1. Khởi tạo bài toán:</b><br>
         &nbsp;&nbsp;&nbsp;&bull; Nhập <b>số biến</b> (n) và <b>số ràng buộc</b> (m).<br>
-        &nbsp;&nbsp;&nbsp;&bull; Nhấn nút <b style="color: #A6E3A1;">OK</b> để phần mềm tạo bảng nhập liệu.</p>
+        &nbsp;&nbsp;&nbsp;&bull; Nhấn nút <b style="color: #0078D7;">OK</b> để phần mềm tạo bảng nhập liệu.</p>
 
         <p style="margin-bottom: 12px;"><b>2. Nhập Hàm mục tiêu (Z):</b><br>
         &nbsp;&nbsp;&nbsp;&bull; Nhập hệ số cho từng biến (x1, x2...). Cột <b>x0</b> dùng để nhập hằng số tự do.<br>
-        &nbsp;&nbsp;&nbsp;&bull; Chọn mục tiêu: <b style="color: #F38BA8;">Max</b> (Tìm GTLN) hoặc <b style="color: #F38BA8;">Min</b> (Tìm GTNN).</p>
+        &nbsp;&nbsp;&nbsp;&bull; Chọn mục tiêu: <b style="color: #D9534F;">Max</b> (Tìm GTLN) hoặc <b style="color: #D9534F;">Min</b> (Tìm GTNN).</p>
 
         <p style="margin-bottom: 12px;"><b>3. Nhập Ma trận Ràng buộc:</b><br>
         &nbsp;&nbsp;&nbsp;&bull; Điền hệ số của các biến vào từng phương trình ràng buộc.<br>
         &nbsp;&nbsp;&nbsp;&bull; Tại cột <b>Sign</b>, chọn dấu tương ứng (<b>&lt;=</b>, <b>=</b>, <b>&gt;=</b>).<br>
         &nbsp;&nbsp;&nbsp;&bull; Điền hệ số vế phải vào cột <b>b_i</b>.</p>
 
-        <div style="background-color: #313244; padding: 10px; border-radius: 5px; margin-bottom: 12px;">
+        <div style="background-color: #E8E8E8; padding: 10px; border-radius: 5px; margin-bottom: 12px; border: 1px solid #CCCCCC;">
             <i>Phần mềm hỗ trợ tự động tính toán khi bạn nhập biểu thức phức tạp vào ô hệ số:</i><br>
-            &nbsp;&nbsp;&nbsp;&bull; <b>Các phép tính cơ bản:</b> Nhập <code style="color: #89B4FA;">pi - 1</code>, <code style="color: #89B4FA;">3/7</code>, <code style="color: #89B4FA;">2*e</code>...<br>
-            &nbsp;&nbsp;&nbsp;&bull; <b>Lũy thừa:</b> Nhập <code style="color: #89B4FA;">2^3</code>, <code style="color: #89B4FA;">e^4</code>, <code style="color: #89B4FA;">pi^4</code>...<br>
-            &nbsp;&nbsp;&nbsp;&bull; <b>Căn số:</b> Nhập <code style="color: #89B4FA;">sqrt(2)</code>, <code style="color: #89B4FA;">root3(8)</code> (căn bậc 3)...<br>
-            &nbsp;&nbsp;&nbsp;&bull; <b>Ngoặc đơn:</b> Nhập <code style="color: #89B4FA;">(pi-1)/2</code>, <code style="color: #89B4FA;">-(2^4)</code>...
+            &nbsp;&nbsp;&nbsp;&bull; <b>Các phép tính cơ bản:</b> Nhập <code style="color: #0078D7;">pi - 1</code>, <code style="color: #0078D7;">3/7</code>, <code style="color: #0078D7;">2*e</code>...<br>
+            &nbsp;&nbsp;&nbsp;&bull; <b>Lũy thừa:</b> Nhập <code style="color: #0078D7;">2^3</code>, <code style="color: #0078D7;">e^4</code>, <code style="color: #0078D7;">pi^4</code>...<br>
+            &nbsp;&nbsp;&nbsp;&bull; <b>Căn số:</b> Nhập <code style="color: #0078D7;">sqrt(2)</code>, <code style="color: #0078D7;">root3(8)</code> (căn bậc 3)...<br>
+            &nbsp;&nbsp;&nbsp;&bull; <b>Ngoặc đơn:</b> Nhập <code style="color: #0078D7;">(pi-1)/2</code>, <code style="color: #0078D7;">-(2^4)</code>...
         </div>
 
         <p style="margin-bottom: 12px;"><b>4. Ràng buộc dấu của biến:</b><br>
         &nbsp;&nbsp;&nbsp;&bull; Ở bảng góc dưới, bạn có thể chỉnh giới hạn biến (Mặc định x_i &gt;= 0).<br>
-        &nbsp;&nbsp;&nbsp;&bull; Nếu biến tự do (không ràng buộc dấu), hãy chọn <b style="color: #F9E2AF;">free</b>.</p>
+        &nbsp;&nbsp;&nbsp;&bull; Nếu biến tự do (không ràng buộc dấu), hãy chọn <b>free</b>.</p>
 
         <p style="margin-bottom: 20px;"><b>5. Giải bài toán:</b><br>
         &nbsp;&nbsp;&nbsp;&bull; Chọn thuật toán muốn sử dụng ở thanh menu thả xuống.<br>
-        &nbsp;&nbsp;&nbsp;&bull; Nhấn nút <b style="color: #89B4FA;">Solve</b> để xem chi tiết lời giải từng bước.</p>
+        &nbsp;&nbsp;&nbsp;&bull; Nhấn nút <b style="color: #0078D7;">Solve</b> để xem chi tiết lời giải từng bước.</p>
 
-        <p style="color: #A6ADC8; font-style: italic; margin-bottom: 15px;">* Nhấn nút <b>Reset</b> (mũi tên xoay) để dọn dẹp bảng và nhập bài toán mới.</p>
+        <p style="color: #666666; font-style: italic; margin-bottom: 15px;">* Nhấn nút <b>Reset</b> (mũi tên xoay) để dọn dẹp bảng và nhập bài toán mới.</p>
 
-        <p style="font-size: 15px; color: #CDD6F4;">
+        <p style="font-size: 15px;">
             🌐 Xem chi tiết file hướng dẫn (PDF):
-            <a href="https://github.com/Alee-deg/Project-of-Alee/blob/Algorithm_of_Hau/LinkDonwLoadApp.pdf" style="color: #89B4FA; text-decoration: none; font-weight: bold;">Tại đây</a>
+            <a href="https://github.com/Alee-deg/Project-of-Alee/blob/Algorithm_of_Hau/LinkDonwLoadApp.pdf" style="color: #0078D7; text-decoration: none; font-weight: bold;">Tại đây</a>
         </p>
     )";
+
+    // Tự động biến đổi màu mã HTML cho chuẩn với nền Dark Mode
+    if (isDark) {
+        guideText.replace("#E8E8E8", "#313244");
+        guideText.replace("#CCCCCC", "#45475A");
+        guideText.replace("#0078D7", "#89B4FA");
+        guideText.replace("#D9534F", "#F38BA8");
+        guideText.replace("#666666", "#A6ADC8");
+    }
 
     textLabel->setText(guideText);
     scrollLayout->addWidget(textLabel);
@@ -604,14 +966,10 @@ void Dashboard::on_btn_HuongDan_clicked()
     QHBoxLayout *btnLayout = new QHBoxLayout();
     QPushButton *closeBtn = new QPushButton("Đã hiểu");
     closeBtn->setCursor(Qt::PointingHandCursor);
-    closeBtn->setStyleSheet(
-        "QPushButton {"
-        "   background-color: #89B4FA; color: #1E1E2E; border: none;"
-        "   border-radius: 6px; padding: 9px 35px; font-size: 15px; font-weight: bold;"
-        "}"
-        "QPushButton:hover { background-color: #B4BEFE; }"
-        "QPushButton:pressed { background-color: #74C7EC; }"
-        );
+    closeBtn->setStyleSheet(isDark ?
+                                "QPushButton { background-color: #89B4FA; color: #1E1E2E; border: none; border-radius: 6px; padding: 9px 35px; font-size: 15px; font-weight: bold; } QPushButton:hover { background-color: #B4BEFE; }" :
+                                "QPushButton { background-color: #0078D7; color: #FFFFFF; border: none; border-radius: 6px; padding: 9px 35px; font-size: 15px; font-weight: bold; } QPushButton:hover { background-color: #005A9E; }"
+                            );
     QObject::connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
 
     btnLayout->addStretch();

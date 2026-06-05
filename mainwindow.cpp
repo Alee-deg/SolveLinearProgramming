@@ -3,17 +3,159 @@
 #include <QPropertyAnimation>
 #include <QGraphicsOpacityEffect>
 #include <QIcon>
+#include <QApplication>
+#include <QSettings>
+#include <QMenuBar>
+#include <QPushButton>
+#include <QFile>
+
+// =======================================================================
+// HÀM QUẢN LÝ THEME GLOBAL (Ép buộc toàn bộ ứng dụng đổi màu bằng !important)
+// =======================================================================
+void applyGlobalTheme(bool isDark) {
+    QString css;
+    if (isDark) {
+        css = "* { font-family: 'Times New Roman'; font-size: 13pt; }"
+              "QMainWindow, QDialog, QWidget#centralwidget { background-color: #1E1E2E !important; color: #CDD6F4 !important; }"
+
+              /* ÉP CHỮ MÀU TRẮNG TUYỆT ĐỐI */
+              "QLabel, QRadioButton, QCheckBox, QGroupBox { background-color: transparent !important; color: #CDD6F4 !important; border: none !important; }"
+
+              /* ÉP MÀU BẢNG BIỂU VÀ THANH DỌC (FIX LỖI VỆT ĐEN) */
+              "QTableWidget, QTableView { background-color: #181825 !important; color: #CDD6F4 !important; gridline-color: #45475A !important; border: 1px solid #45475A !important; }"
+              "QTableView::viewport { background-color: #181825 !important; }"
+              "QHeaderView { background-color: #181825 !important; border: none !important; }"
+              "QTableWidget::item { background-color: transparent !important; color: #CDD6F4 !important; }"
+              "QHeaderView::section { background-color: #313244 !important; color: #CDD6F4 !important; font-weight: bold !important; border: 1px solid #45475A !important; padding: 4px !important; }"
+              "QTableCornerButton::section { background-color: #313244 !important; border: 1px solid #45475A !important; }"
+
+              /* ÉP MÀU Ô NHẬP LIỆU */
+              "QLineEdit { background-color: transparent !important; color: #CDD6F4 !important; border: none !important; }"
+              "QLineEdit:focus { background-color: #313244 !important; border: 2px solid #89B4FA !important; }"
+              "QLineEdit:disabled { background-color: #313244 !important; color: #6C7086 !important; }"
+              "QComboBox, QSpinBox { background-color: #313244 !important; color: #CDD6F4 !important; border: 1px solid #45475A !important; border-radius: 4px !important; padding: 2px !important; }"
+              "QComboBox:focus, QSpinBox:focus { background-color: #45475A !important; border: 2px solid #89B4FA !important; }"
+              "QComboBox QAbstractItemView { background-color: #313244 !important; color: #CDD6F4 !important; selection-background-color: #45475A !important; }"
+
+              /* TRẢ LẠI KHUNG CHO Ô GIÁ TRỊ TỐI ƯU */
+              "QLineEdit#lineEdit_Z { background-color: #313244 !important; border: 1px solid #45475A !important; border-radius: 4px !important; padding: 4px !important; color: #A6E3A1 !important; font-weight: bold !important; }"
+
+              /* NÚT BẤM THƯỜNG */
+              "QPushButton { background-color: #313244 !important; color: #CDD6F4 !important; border: 1px solid #45475A !important; border-radius: 4px !important; padding: 6px 15px !important; font-weight: bold !important; }"
+              "QPushButton:hover { background-color: #45475A !important; }"
+
+              /* NÚT GIẢI BÀI TOÁN (NỔI BẬT CHUNG) */
+              "QPushButton#pushButton_3 { background-color: #89B4FA !important; color: #1E1E2E !important; border: none !important; }"
+              "QPushButton#pushButton_3:hover { background-color: #B4BEFE !important; }"
+
+              /* FIX LỖI: ÉP RIÊNG NÚT HỎI ĐÁP Ở WDSOLVE VỀ LẠI MÀU BÌNH THƯỜNG */
+              "WdSolve QPushButton#pushButton_3 { background-color: #313244 !important; color: #CDD6F4 !important; border: 1px solid #45475A !important; }"
+              "WdSolve QPushButton#pushButton_3:hover { background-color: #45475A !important; }"
+
+              /* NÚT GẠT ĐỔI MÀU GÓC TRÁI */
+              "QPushButton#btnThemeToggle { background-color: #313244 !important; color: #F9E2AF !important; border: 1px solid #45475A !important; border-radius: 20px !important; font-weight: bold !important; font-size: 12pt !important; }"
+              "QPushButton#btnThemeToggle:hover { background-color: #45475A !important; }"
+
+              "QMessageBox { background-color: #1E1E2E !important; }"
+              "QMessageBox QLabel { background-color: transparent !important; color: #CDD6F4 !important; font-weight: bold !important; }"
+              "QTextBrowser { background-color: #181825 !important; color: #CDD6F4 !important; border: 1px solid #45475A !important; border-radius: 8px !important; padding: 15px !important; }";
+    } else {
+        css = "* { font-family: 'Times New Roman'; font-size: 13pt; }"
+              "QMainWindow, QDialog, QWidget#centralwidget { background-color: #F5F7FA !important; color: #333333 !important; }"
+
+              /* ÉP CHỮ MÀU ĐEN TUYỆT ĐỐI */
+              "QLabel, QRadioButton, QCheckBox, QGroupBox { background-color: transparent !important; color: #333333 !important; border: none !important; }"
+
+              /* ÉP MÀU BẢNG BIỂU VÀ THANH DỌC (FIX LỖI VỆT ĐEN) */
+              "QTableWidget, QTableView { background-color: #FFFFFF !important; color: #333333 !important; gridline-color: #CCCCCC !important; border: 1px solid #CCCCCC !important; }"
+              "QTableView::viewport { background-color: #FFFFFF !important; }"
+              "QHeaderView { background-color: #FFFFFF !important; border: none !important; }"
+              "QTableWidget::item { background-color: transparent !important; color: #333333 !important; }"
+              "QHeaderView::section { background-color: #E8E8E8 !important; color: #333333 !important; font-weight: bold !important; border: 1px solid #C0C0C0 !important; padding: 4px !important; }"
+              "QTableCornerButton::section { background-color: #E8E8E8 !important; border: 1px solid #C0C0C0 !important; }"
+
+              /* ÉP MÀU Ô NHẬP LIỆU */
+              "QLineEdit { background-color: transparent !important; color: #333333 !important; border: none !important; }"
+              "QLineEdit:focus { background-color: #FFFFFF !important; border: 2px solid #0078D7 !important; }"
+              "QLineEdit:disabled { background-color: #E8E8E8 !important; color: #999999 !important; }"
+              "QComboBox, QSpinBox { background-color: #FFFFFF !important; color: #333333 !important; border: 1px solid #CCCCCC !important; border-radius: 4px !important; padding: 2px !important; }"
+              "QComboBox:focus, QSpinBox:focus { background-color: #F5F7FA !important; border: 2px solid #0078D7 !important; }"
+              "QComboBox QAbstractItemView { background-color: #FFFFFF !important; color: #333333 !important; selection-background-color: #E6F0FA !important; }"
+
+              /* TRẢ LẠI KHUNG CHO Ô GIÁ TRỊ TỐI ƯU */
+              "QLineEdit#lineEdit_Z { background-color: #FFFFFF !important; border: 1px solid #CCCCCC !important; border-radius: 4px !important; padding: 4px !important; color: #0078D7 !important; font-weight: bold !important; }"
+
+              /* NÚT BẤM THƯỜNG */
+              "QPushButton { background-color: #FFFFFF !important; color: #333333 !important; border: 1px solid #CCCCCC !important; border-radius: 4px !important; padding: 6px 15px !important; font-weight: bold !important; }"
+              "QPushButton:hover { background-color: #E8E8E8 !important; }"
+
+              /* NÚT GIẢI BÀI TOÁN (NỔI BẬT CHUNG) */
+              "QPushButton#pushButton_3 { background-color: #0078D7 !important; color: #FFFFFF !important; border: none !important; }"
+              "QPushButton#pushButton_3:hover { background-color: #005A9E !important; }"
+
+              /* FIX LỖI: ÉP RIÊNG NÚT HỎI ĐÁP Ở WDSOLVE VỀ LẠI MÀU BÌNH THƯỜNG */
+              "WdSolve QPushButton#pushButton_3 { background-color: #FFFFFF !important; color: #333333 !important; border: 1px solid #CCCCCC !important; }"
+              "WdSolve QPushButton#pushButton_3:hover { background-color: #E8E8E8 !important; }"
+
+              /* NÚT GẠT ĐỔI MÀU GÓC TRÁI */
+              "QPushButton#btnThemeToggle { background-color: #FFFFFF !important; color: #333333 !important; border: 1px solid #CCCCCC !important; border-radius: 20px !important; font-weight: bold !important; font-size: 12pt !important; }"
+              "QPushButton#btnThemeToggle:hover { background-color: #E8E8E8 !important; }"
+
+              "QMessageBox { background-color: #F5F7FA !important; }"
+              "QMessageBox QLabel { background-color: transparent !important; color: #222222 !important; font-weight: bold !important; }"
+              "QTextBrowser { background-color: #FFFFFF !important; color: #212529 !important; border: 1px solid #DEE2E6 !important; border-radius: 8px !important; padding: 15px !important; }";
+    }
+
+    // Ép màu sắc lên toàn bộ ứng dụng (MainWindow, Dashboard, WdSolve, v.v.)
+    qApp->setStyleSheet(css);
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+
+    // Tẩy rửa tàn dư CSS để cửa sổ nghe lời Theme
+    this->setStyleSheet("");
+    ui->centralwidget->setStyleSheet("");
+
+    // Ẩn hoàn toàn thanh MenuBar thừa thãi ở trên cùng
+    menuBar()->hide();
+
+    // =======================================================================
+    // TẠO NÚT GẠT ĐỔI MÀU GẮN TRỰC TIẾP LÊN GÓC TRÁI TRÊN CÙNG
+    // =======================================================================
+    QPushButton *btnThemeToggle = new QPushButton(ui->centralwidget); // Gắn thẳng vào màn hình chính
+    btnThemeToggle->setObjectName("btnThemeToggle"); // Nhận CSS bo tròn
+    btnThemeToggle->setCursor(Qt::PointingHandCursor);
+
+    // Đặt vị trí Tuyệt đối (Absolute Positioning): x = 20, y = 20, chiều rộng = 110, chiều cao = 40
+    btnThemeToggle->setGeometry(20, 20, 110, 40);
+
+    // Đọc trạng thái khởi đầu
+    QString iniPath = QCoreApplication::applicationDirPath() + "/settings.ini";
+    QSettings settings(iniPath, QSettings::IniFormat);
+    bool isDarkMode = settings.value("dark_mode", false).toBool();
+
+    btnThemeToggle->setText(isDarkMode ? "☀️ Sáng" : "🌙 Tối");
+    applyGlobalTheme(isDarkMode);
+
+    // Sự kiện khi bấm nút gạt
+    connect(btnThemeToggle, &QPushButton::clicked, this, [btnThemeToggle, iniPath]() {
+        QSettings s(iniPath, QSettings::IniFormat);
+        bool currentDark = s.value("dark_mode", false).toBool();
+        bool newDark = !currentDark;
+
+        s.setValue("dark_mode", newDark);
+        btnThemeToggle->setText(newDark ? "☀️ Sáng" : "🌙 Tối");
+        applyGlobalTheme(newDark); // Lập tức đổi màu toàn bộ cửa sổ
+    });
+
     this->dashboard = nullptr;
     this->setWindowTitle("Phần mềm giải Quy Hoạch Tuyến Tính - Ver 1.0");
     this->setWindowState(Qt::WindowMaximized);
     this->setWindowIcon(QIcon(":/logo.png"));
-    qDebug() << "Icon co bi rong khong?: " << this->windowIcon().isNull();
 }
 
 MainWindow::~MainWindow()
@@ -66,34 +208,12 @@ void MainWindow::on_btnGioiThieu_clicked()
     policyDialog->setWindowTitle("Giới thiệu");
     policyDialog->resize(1150, 1050);
 
-    policyDialog->setStyleSheet(
-        "QDialog { background-color: #F8F9FA; }"
-        "QTextBrowser { "
-        "   background-color: #FFFFFF; "
-        "   border: 1px solid #DEE2E6; "
-        "   border-radius: 8px; "
-        "   padding: 15px; "
-        "   color: #212529; "
-        "}"
-        "QPushButton { "
-        "   padding: 10px 30px; "
-        "   background-color: #004085; "
-        "   color: white; "
-        "   font-size: 14pt; "
-        "   font-weight: bold; "
-        "   border-radius: 5px; "
-        "   border: none; "
-        "}"
-        "QPushButton:hover { background-color: #0056B3; }"
-        );
-
     QVBoxLayout *layout = new QVBoxLayout(policyDialog);
     layout->setContentsMargins(20, 20, 20, 20);
 
     QTextBrowser *textBrowser = new QTextBrowser(policyDialog);
     textBrowser->setOpenExternalLinks(true);
 
-    // [FIX HTML] Đổi <h4> thành <p> để Qt nhận đúng cỡ chữ lớn và KHÔNG in đậm
     QString htmlContent = R"(
         <div style="font-family: 'Times New Roman', serif; font-size: 18pt; line-height: 1.6;">
             <h2 style="color: #0056B3; text-align: center; margin-bottom: 5px; font-size: 24pt;">GIỚI THIỆU</h2>
@@ -137,6 +257,14 @@ void MainWindow::on_btnGioiThieu_clicked()
         </div>
     )";
 
+    // Chuyển đổi mã màu HTML cho dễ nhìn trong Dark Mode
+    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    if (settings.value("dark_mode", false).toBool()) {
+        htmlContent.replace("#0056B3", "#89B4FA");
+        htmlContent.replace("#D9534F", "#F38BA8");
+        htmlContent.replace("#CCCCCC", "#45475A");
+    }
+
     textBrowser->setHtml(htmlContent);
     layout->addWidget(textBrowser);
 
@@ -155,33 +283,11 @@ void MainWindow::on_btnGioiThieu_clicked()
     delete policyDialog;
 }
 
-
 void MainWindow::on_btnChinhSach_clicked()
 {
     QDialog *policyDialog = new QDialog(this);
     policyDialog->setWindowTitle("Chính sách sử dụng");
     policyDialog->resize(1150, 1050);
-
-    policyDialog->setStyleSheet(
-        "QDialog { background-color: #F8F9FA; }"
-        "QTextBrowser { "
-        "   background-color: #FFFFFF; "
-        "   border: 1px solid #DEE2E6; "
-        "   border-radius: 8px; "
-        "   padding: 15px; "
-        "   color: #212529; "
-        "}"
-        "QPushButton { "
-        "   padding: 10px 30px; "
-        "   background-color: #004085; "
-        "   color: white; "
-        "   font-size: 14pt; "
-        "   font-weight: bold; "
-        "   border-radius: 5px; "
-        "   border: none; "
-        "}"
-        "QPushButton:hover { background-color: #0056B3; }"
-        );
 
     QVBoxLayout *layout = new QVBoxLayout(policyDialog);
     layout->setContentsMargins(20, 20, 20, 20);
@@ -189,7 +295,6 @@ void MainWindow::on_btnChinhSach_clicked()
     QTextBrowser *textBrowser = new QTextBrowser(policyDialog);
     textBrowser->setOpenExternalLinks(true);
 
-    // [FIX HTML] Đổi <h4> thành <p> để Qt nhận đúng cỡ chữ lớn và KHÔNG in đậm
     QString htmlContent = R"(
         <div style="font-family: 'Times New Roman', serif; font-size: 18pt; line-height: 1.6;">
             <br>
@@ -209,6 +314,13 @@ void MainWindow::on_btnChinhSach_clicked()
         </div>
     )";
 
+    // Chuyển đổi mã màu HTML cho dễ nhìn trong Dark Mode
+    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    if (settings.value("dark_mode", false).toBool()) {
+        htmlContent.replace("#0056B3", "#89B4FA");
+        htmlContent.replace("#D9534F", "#F38BA8");
+    }
+
     textBrowser->setHtml(htmlContent);
     layout->addWidget(textBrowser);
 
@@ -226,4 +338,3 @@ void MainWindow::on_btnChinhSach_clicked()
     policyDialog->exec();
     delete policyDialog;
 }
-

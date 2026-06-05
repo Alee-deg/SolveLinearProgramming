@@ -27,11 +27,11 @@
    <string>MainWindow</string>
   </property>
   <property name="styleSheet">
-   <string notr="true">background-color: rgb(246, 245, 244)</string>
+   <string notr="true"/>
   </property>
   <widget class="QWidget" name="centralwidget">
    <property name="styleSheet">
-    <string notr="true">background-color: #f8fafc;</string>
+    <string notr="true"/>
    </property>
    <layout class="QVBoxLayout" name="verticalLayout">
     <item>
@@ -46,7 +46,7 @@
          </font>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: black</string>
+         <string notr="true"/>
         </property>
         <property name="text">
          <string>Giá trị tối ưu: </string>
@@ -65,7 +65,7 @@
          <bool>false</bool>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: black</string>
+         <string notr="true"/>
         </property>
         <property name="readOnly">
          <bool>true</bool>
@@ -82,7 +82,7 @@
          </font>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: black</string>
+         <string notr="true"/>
         </property>
         <property name="text">
          <string>Nghiệm tối ưu: </string>
@@ -114,7 +114,7 @@
          </font>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: black</string>
+         <string notr="true"/>
         </property>
        </widget>
       </item>
@@ -128,7 +128,7 @@
          </font>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: black</string>
+         <string notr="true"/>
         </property>
         <property name="text">
          <string>Các bước thực thi: </string>
@@ -154,10 +154,10 @@
          </font>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: black</string>
+         <string notr="true"/>
         </property>
         <property name="currentIndex">
-         <number>2</number>
+         <number>0</number>
         </property>
         <widget class="QWidget" name="tab">
          <attribute name="title">
@@ -194,32 +194,7 @@
            </font>
           </property>
           <property name="styleSheet">
-           <string notr="true">QPushButton {
-    border: 1px solid #A0A0A0; /* Viền xám nét căng bao quanh 4 cạnh */
-    border-radius: 4px;        /* Bo góc nhẹ cho hiện đại */
-    background-color: #F5F5F5; /* Màu nền xám trắng tinh tế */
-    min-height: 28px;          /* Ép chiều cao chuẩn để không bị lùn */
-    padding: 0px 15px;         /* Khoảng cách từ chữ ra viền */
-    color: #000000;            /* Màu chữ */
-}
-
-/* Hiệu ứng khi lướt chuột qua (Hover) */
-QPushButton:hover {
-    background-color: #E5E5E5;
-    border: 1px solid #0078D7; /* Viền sáng lên màu xanh đặc trưng của Windows */
-}
-
-/* Hiệu ứng khi nhấn chuột xuống (Pressed) */
-QPushButton:pressed {
-    background-color: #D4D4D4;
-}
-
-/* Dành cho nút đang bị vô hiệu hóa (Disabled) */
-QPushButton:disabled {
-    background-color: #F0F0F0;
-    color: #A0A0A0;
-    border: 1px solid #D0D0D0;
-}</string>
+           <string notr="true"/>
           </property>
           <property name="text">
            <string>Biểu diễn hình học (Chỉ hỗ trợ cho trường hợp 2 biến số)</string>
@@ -259,32 +234,7 @@ QPushButton:disabled {
            </font>
           </property>
           <property name="styleSheet">
-           <string notr="true">QPushButton {
-    border: 1px solid #A0A0A0; /* Viền xám nét căng bao quanh 4 cạnh */
-    border-radius: 4px;        /* Bo góc nhẹ cho hiện đại */
-    background-color: #F5F5F5; /* Màu nền xám trắng tinh tế */
-    min-height: 28px;          /* Ép chiều cao chuẩn để không bị lùn */
-    padding: 0px 15px;         /* Khoảng cách từ chữ ra viền */
-    color: #000000;            /* Màu chữ */
-}
-
-/* Hiệu ứng khi lướt chuột qua (Hover) */
-QPushButton:hover {
-    background-color: #E5E5E5;
-    border: 1px solid #0078D7; /* Viền sáng lên màu xanh đặc trưng của Windows */
-}
-
-/* Hiệu ứng khi nhấn chuột xuống (Pressed) */
-QPushButton:pressed {
-    background-color: #D4D4D4;
-}
-
-/* Dành cho nút đang bị vô hiệu hóa (Disabled) */
-QPushButton:disabled {
-    background-color: #F0F0F0;
-    color: #A0A0A0;
-    border: 1px solid #D0D0D0;
-}</string>
+           <string notr="true"/>
           </property>
           <property name="text">
            <string>Hỏi/Đáp</string>
@@ -324,32 +274,7 @@ QPushButton:disabled {
            </font>
           </property>
           <property name="styleSheet">
-           <string notr="true">QPushButton {
-    border: 1px solid #A0A0A0; /* Viền xám nét căng bao quanh 4 cạnh */
-    border-radius: 4px;        /* Bo góc nhẹ cho hiện đại */
-    background-color: #F5F5F5; /* Màu nền xám trắng tinh tế */
-    min-height: 28px;          /* Ép chiều cao chuẩn để không bị lùn */
-    padding: 0px 15px;         /* Khoảng cách từ chữ ra viền */
-    color: #000000;            /* Màu chữ */
-}
-
-/* Hiệu ứng khi lướt chuột qua (Hover) */
-QPushButton:hover {
-    background-color: #E5E5E5;
-    border: 1px solid #0078D7; /* Viền sáng lên màu xanh đặc trưng của Windows */
-}
-
-/* Hiệu ứng khi nhấn chuột xuống (Pressed) */
-QPushButton:pressed {
-    background-color: #D4D4D4;
-}
-
-/* Dành cho nút đang bị vô hiệu hóa (Disabled) */
-QPushButton:disabled {
-    background-color: #F0F0F0;
-    color: #A0A0A0;
-    border: 1px solid #D0D0D0;
-}</string>
+           <string notr="true"/>
           </property>
           <property name="text">
            <string>OK</string>

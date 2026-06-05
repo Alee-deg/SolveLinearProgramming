@@ -8,10 +8,8 @@ int main(int argc, char *argv[])
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
     QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
 
-
     QApplication a(argc, argv);
     a.setWindowIcon(QIcon(":/logo.png"));
-
 
     // Kích hoạt giao diện native của Windows (viền nút sắc nét, bo góc)
     a.setStyle(QStyleFactory::create("windowsvista"));

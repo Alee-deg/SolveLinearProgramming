@@ -21,80 +21,12 @@
   </property>
   <widget class="QWidget" name="centralwidget">
    <property name="styleSheet">
-    <string notr="true">background-color: #F5F7FA;
-
-/* Tinh chỉnh GroupBox (khu vực chứa các bảng) cho gọn gàng */
-
-QGroupBox {
-
-    border: 1px solid #CCCCCC;
-
-    border-radius: 5px;
-
-    margin-top: 10px;
-
-    font-weight: bold;
-
-}
-
-QGroupBox::title {
-
-    subcontrol-origin: margin;
-
-    left: 10px;
-
-    padding: 0 3px;
-
-}
-
-QTableWidget QComboBox, QTableWidget QSpinBox, QTableWidget QDoubleSpinBox {
-
-    border: none;             /* Bỏ hẳn viền */
-
-    background: transparent;  /* Cho nền trong suốt tiệp màu với bảng */
-
-}
-
-
-/* Khi người dùng click vào để sửa thì mới hiện nền lên cho dễ nhìn */
-
-QTableWidget QComboBox:focus, QTableWidget QSpinBox:focus, QTableWidget QDoubleSpinBox:focus {
-
-    background: white;
-
-    border: 1px solid #0078D7; /* Khung viền xanh hiện ra báo hiệu đang chọn */
-
-}
-
-QTableWidget QComboBox, QTableWidget QSpinBox, QTableWidget QDoubleSpinBox {
-
-    margin: 2px; /* Đẩy lùi vào 1px ở cả 4 góc để không bị lẹm viền */
-
-}
-
-QTableWidget QComboBox {
-
-    border: none;             /* Xóa sổ cái viền 3D hay bị lẹm */
-
-    background: transparent;  /* Cho nền trong suốt */
-
-}
-
-
-/* Chỉ hiện viền mỏng màu xanh khi người dùng bấm vào để chọn */
-
-QTableWidget QComboBox:focus {
-
-    border: 1px solid #0078D7;
-
-    background: white;
-
-}</string>
+    <string notr="true"/>
    </property>
-   <layout class="QVBoxLayout" name="verticalLayout" stretch="0,1,0">
+   <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,0">
     <item>
      <layout class="QGridLayout" name="gridLayout">
-      <item row="1" column="0">
+      <item row="3" column="0">
        <widget class="QLabel" name="label_2">
         <property name="font">
          <font>
@@ -104,28 +36,14 @@ QTableWidget QComboBox:focus {
          </font>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: black</string>
+         <string notr="true"/>
         </property>
         <property name="text">
          <string>Số ràng buộc: </string>
         </property>
        </widget>
       </item>
-      <item row="0" column="1">
-       <widget class="QSpinBox" name="spinBox">
-        <property name="styleSheet">
-         <string notr="true">color: black</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="QSpinBox" name="spinBox_2">
-        <property name="styleSheet">
-         <string notr="true">color: black</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="0">
+      <item row="1" column="0">
        <widget class="QLabel" name="label">
         <property name="font">
          <font>
@@ -135,14 +53,14 @@ QTableWidget QComboBox:focus {
          </font>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: black</string>
+         <string notr="true"/>
         </property>
         <property name="text">
          <string>Số biến: </string>
         </property>
        </widget>
       </item>
-      <item row="0" column="4" rowspan="2">
+      <item row="1" column="4" rowspan="3">
        <widget class="QPushButton" name="btn_HuongDan">
         <property name="font">
          <font>
@@ -184,7 +102,34 @@ QPushButton:pressed {
         </property>
        </widget>
       </item>
-      <item row="0" column="2">
+      <item row="3" column="1">
+       <widget class="QSpinBox" name="spinBox_2">
+        <property name="styleSheet">
+         <string notr="true"/>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="3" rowspan="3">
+       <spacer name="horizontalSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+      <item row="1" column="1">
+       <widget class="QSpinBox" name="spinBox">
+        <property name="styleSheet">
+         <string notr="true"/>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="2">
        <widget class="QPushButton" name="pushButton_2">
         <property name="sizePolicy">
          <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
@@ -234,23 +179,10 @@ QPushButton:pressed {
         </property>
        </widget>
       </item>
-      <item row="0" column="3" rowspan="2">
-       <spacer name="horizontalSpacer">
-        <property name="orientation">
-         <enum>Qt::Horizontal</enum>
-        </property>
-        <property name="sizeHint" stdset="0">
-         <size>
-          <width>40</width>
-          <height>20</height>
-         </size>
-        </property>
-       </spacer>
-      </item>
      </layout>
     </item>
     <item>
-     <layout class="QGridLayout" name="gridLayout_2" rowstretch="1,0,0" columnstretch="0,0,0">
+     <layout class="QGridLayout" name="gridLayout_2" rowstretch="1,0,0,0" columnstretch="0,0,0">
       <item row="0" column="2">
        <widget class="QComboBox" name="max_min">
         <property name="maximumSize">
@@ -323,7 +255,46 @@ QComboBox QAbstractItemView {
         </item>
        </widget>
       </item>
-      <item row="1" column="2" alignment="Qt::AlignTop">
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_5">
+        <property name="font">
+         <font>
+          <family>Tinos</family>
+          <pointsize>15</pointsize>
+          <bold>true</bold>
+         </font>
+        </property>
+        <property name="styleSheet">
+         <string notr="true"/>
+        </property>
+        <property name="text">
+         <string>Nhập vào các ràng buộc cho biến:</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QTableWidget" name="matrix">
+        <property name="minimumSize">
+         <size>
+          <width>150</width>
+          <height>100</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>1000</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true"/>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="2" alignment="Qt::AlignTop">
        <widget class="QPushButton" name="pushButton_5">
         <property name="font">
          <font>
@@ -359,46 +330,7 @@ QPushButton:pressed {
         </property>
        </widget>
       </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="label_5">
-        <property name="font">
-         <font>
-          <family>Tinos</family>
-          <pointsize>15</pointsize>
-          <bold>true</bold>
-         </font>
-        </property>
-        <property name="styleSheet">
-         <string notr="true">color: black</string>
-        </property>
-        <property name="text">
-         <string>Nhập vào các ràng buộc cho biến:</string>
-        </property>
-        <property name="alignment">
-         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="QTableWidget" name="matrix">
-        <property name="minimumSize">
-         <size>
-          <width>150</width>
-          <height>100</height>
-         </size>
-        </property>
-        <property name="maximumSize">
-         <size>
-          <width>16777215</width>
-          <height>1000</height>
-         </size>
-        </property>
-        <property name="styleSheet">
-         <string notr="true">color: black</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="1">
+      <item row="3" column="1">
        <widget class="QTableWidget" name="table_varConstraint">
         <property name="minimumSize">
          <size>
@@ -407,7 +339,7 @@ QPushButton:pressed {
          </size>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: black</string>
+         <string notr="true"/>
         </property>
         <property name="columnCount">
          <number>3</number>
@@ -420,7 +352,7 @@ QPushButton:pressed {
         <column/>
        </widget>
       </item>
-      <item row="1" column="0">
+      <item row="2" column="0">
        <widget class="QLabel" name="label_4">
         <property name="maximumSize">
          <size>
@@ -436,32 +368,13 @@ QPushButton:pressed {
          </font>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: black</string>
+         <string notr="true"/>
         </property>
         <property name="text">
          <string>Nhập vào các ràng buộc: </string>
         </property>
         <property name="alignment">
          <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="QTableWidget" name="table_functionTarget">
-        <property name="minimumSize">
-         <size>
-          <width>50</width>
-          <height>77</height>
-         </size>
-        </property>
-        <property name="maximumSize">
-         <size>
-          <width>16777215</width>
-          <height>65</height>
-         </size>
-        </property>
-        <property name="styleSheet">
-         <string notr="true">color:black</string>
         </property>
        </widget>
       </item>
@@ -481,7 +394,7 @@ QPushButton:pressed {
          </font>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: black</string>
+         <string notr="true"/>
         </property>
         <property name="text">
          <string>Nhập vào các hệ số của hàm mục tiêu: </string>
@@ -491,10 +404,29 @@ QPushButton:pressed {
         </property>
        </widget>
       </item>
+      <item row="0" column="1">
+       <widget class="QTableWidget" name="table_functionTarget">
+        <property name="minimumSize">
+         <size>
+          <width>50</width>
+          <height>73</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>65</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true"/>
+        </property>
+       </widget>
+      </item>
      </layout>
     </item>
     <item>
-     <layout class="QHBoxLayout" name="horizontalLayout" stretch="0,1,0,0">
+     <layout class="QHBoxLayout" name="horizontalLayout" stretch="0,1,0,0,0">
       <item>
        <widget class="QPushButton" name="pushButton_4">
         <property name="font">
@@ -549,6 +481,49 @@ QPushButton:pressed {
          </size>
         </property>
        </spacer>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_Undo">
+        <property name="minimumSize">
+         <size>
+          <width>130</width>
+          <height>43</height>
+         </size>
+        </property>
+        <property name="font">
+         <font>
+          <family>Times New Roman</family>
+          <pointsize>13</pointsize>
+          <italic>false</italic>
+          <bold>true</bold>
+         </font>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">QPushButton {
+    background-color: #F3F3F3; 
+    color: #333333;            /* Chữ xám đậm */
+    border: 1px solid #CCCCCC; /* Viền xám nhạt */
+    border-radius: 4px;
+    padding: 5px 12px;
+}
+
+QPushButton:hover {
+    background-color: #E6E6E6;
+    border: 1px solid #B3B3B3;
+}
+
+QPushButton:pressed {
+    background-color: #CCCCCC;
+}</string>
+        </property>
+        <property name="text">
+         <string> History</string>
+        </property>
+        <property name="icon">
+         <iconset resource="resource.qrc">
+          <normaloff>:/new/prefix1/Pasted image.png</normaloff>:/new/prefix1/Pasted image.png</iconset>
+        </property>
+       </widget>
       </item>
       <item>
        <widget class="QComboBox" name="comboAlgorithm">

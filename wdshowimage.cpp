@@ -1,6 +1,8 @@
 #include "wdshowimage.h"
 #include "ui_wdshowimage.h"
 #include "qcustomplot.h"
+#include <QSettings>
+#include <QApplication>
 
 WdShowImage::WdShowImage(QWidget *parent)
     : QMainWindow(parent)
@@ -84,11 +86,71 @@ void WdShowImage::drawGraph(const LinearProgram& lp,
     ui->plot->clearItems();
     ui->plot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom);
 
+    // =======================================================================
+    // TỰ ĐỘNG THAY ĐỔI MÀU SẮC ĐỒ THỊ THEO TRẠNG THÁI SÁNG TỐI CỦA HỆ THỐNG
+    // =======================================================================
+    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    bool isDark = settings.value("dark_mode", false).toBool();
+
+    if (isDark) {
+        // Tô màu nền Tối
+        ui->plot->setBackground(QBrush(QColor("#181825")));
+        ui->plot->axisRect()->setBackground(QBrush(QColor("#11111B")));
+
+        // Màu viền và chữ trục tọa độ Tối
+        QPen axisPen(QColor("#A6ADC8"));
+        ui->plot->xAxis->setBasePen(axisPen);
+        ui->plot->yAxis->setBasePen(axisPen);
+        ui->plot->xAxis->setTickPen(axisPen);
+        ui->plot->yAxis->setTickPen(axisPen);
+        ui->plot->xAxis->setSubTickPen(axisPen);
+        ui->plot->yAxis->setSubTickPen(axisPen);
+        ui->plot->xAxis->setTickLabelColor(QColor("#CDD6F4"));
+        ui->plot->yAxis->setTickLabelColor(QColor("#CDD6F4"));
+        ui->plot->xAxis->setLabelColor(QColor("#89B4FA"));
+        ui->plot->yAxis->setLabelColor(QColor("#89B4FA"));
+
+        // Lưới tọa độ ở chế độ Tối (Đường mờ)
+        QPen gridPen(QColor(69, 71, 90, 100), 1, Qt::DotLine);
+        ui->plot->xAxis->grid()->setPen(gridPen);
+        ui->plot->yAxis->grid()->setPen(gridPen);
+        ui->plot->xAxis->grid()->setZeroLinePen(QPen(QColor("#A6ADC8")));
+        ui->plot->yAxis->grid()->setZeroLinePen(QPen(QColor("#A6ADC8")));
+    } else {
+        // Tô màu nền Sáng (Mặc định)
+        ui->plot->setBackground(QBrush(Qt::white));
+        ui->plot->axisRect()->setBackground(QBrush(Qt::white));
+
+        // Màu viền và chữ trục tọa độ Sáng
+        QPen axisPen(Qt::black);
+        ui->plot->xAxis->setBasePen(axisPen);
+        ui->plot->yAxis->setBasePen(axisPen);
+        ui->plot->xAxis->setTickPen(axisPen);
+        ui->plot->yAxis->setTickPen(axisPen);
+        ui->plot->xAxis->setSubTickPen(axisPen);
+        ui->plot->yAxis->setSubTickPen(axisPen);
+        ui->plot->xAxis->setTickLabelColor(Qt::black);
+        ui->plot->yAxis->setTickLabelColor(Qt::black);
+        ui->plot->xAxis->setLabelColor(Qt::black);
+        ui->plot->yAxis->setLabelColor(Qt::black);
+
+        // Lưới tọa độ ở chế độ Sáng
+        QPen gridPen(QColor(200, 200, 200, 100), 1, Qt::DotLine);
+        ui->plot->xAxis->grid()->setPen(gridPen);
+        ui->plot->yAxis->grid()->setPen(gridPen);
+        ui->plot->xAxis->grid()->setZeroLinePen(QPen(Qt::black));
+        ui->plot->yAxis->grid()->setZeroLinePen(QPen(Qt::black));
+    }
+
     // -------------------------------------------------------------------
     // 1. VẼ CÁC ĐƯỜNG RÀNG BUỘC
     // -------------------------------------------------------------------
-    QList<QColor> colors = {Qt::blue, Qt::darkCyan, Qt::darkMagenta,
-                            Qt::darkYellow, Qt::darkRed};
+    QList<QColor> colors;
+    if (isDark) {
+        colors = {QColor("#89B4FA"), QColor("#94E2D5"), QColor("#CBA6F7"), QColor("#F9E2AF"), QColor("#F38BA8")};
+    } else {
+        colors = {Qt::blue, Qt::darkCyan, Qt::darkMagenta, Qt::darkYellow, Qt::darkRed};
+    }
 
     for (size_t i = 0; i < origLp.A.size(); ++i) {
         if (origLp.A[i].size() < 2) continue;
@@ -108,7 +170,6 @@ void WdShowImage::drawGraph(const LinearProgram& lp,
         constraint->setData(tVec, xVec, yVec);
         constraint->setPen(QPen(colors[i % colors.size()], 2, Qt::SolidLine));
 
-        // Nhãn phương trình
         QString eqText;
         if (std::abs(a1) > 1e-9) {
             if (std::abs(a1 - 1.0) < 1e-9)       eqText += "x1";
@@ -232,7 +293,7 @@ void WdShowImage::drawGraph(const LinearProgram& lp,
         pT.push_back(hull.size()); pX.push_back(hull[0].x()); pY.push_back(hull[0].y());
 
         region->setData(pT, pX, pY);
-        region->setBrush(QBrush(QColor(255, 0, 0, 80)));
+        region->setBrush(QBrush(isDark ? QColor(243, 139, 168, 60) : QColor(255, 0, 0, 80)));
         region->setPen(Qt::NoPen);
     }
 
@@ -240,18 +301,18 @@ void WdShowImage::drawGraph(const LinearProgram& lp,
     // 3. KHỞI TẠO ĐỐI TƯỢNG VẼ BƯỚC NHẢY (QCPCurve)
     // -------------------------------------------------------------------
     simplexPath = new QCPCurve(ui->plot->xAxis, ui->plot->yAxis);
-    simplexPath->setPen(QPen(Qt::black, 2, Qt::DotLine));
-    simplexPath->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssCircle, Qt::red, 8));
+    simplexPath->setPen(QPen(isDark ? QColor("#CDD6F4") : Qt::black, 2, Qt::DotLine));
+    simplexPath->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssCircle, isDark ? QColor("#F38BA8") : Qt::red, 8));
 
     zLineGraph = new QCPCurve(ui->plot->xAxis, ui->plot->yAxis);
-    zLineGraph->setPen(QPen(Qt::red, 2, Qt::DashLine));
+    zLineGraph->setPen(QPen(isDark ? QColor("#F38BA8") : Qt::red, 2, Qt::DashLine));
 
     stepLabel = new QCPItemText(ui->plot);
     stepLabel->setPositionAlignment(Qt::AlignTop | Qt::AlignLeft);
     stepLabel->position->setType(QCPItemPosition::ptAxisRectRatio);
     stepLabel->position->setCoords(0.05, 0.05);
     stepLabel->setFont(QFont("Arial", 12, QFont::Bold));
-    stepLabel->setColor(Qt::darkRed);
+    stepLabel->setColor(isDark ? QColor("#F38BA8") : Qt::darkRed);
 
     ui->plot->xAxis->setLabel("x1");
     ui->plot->yAxis->setLabel("x2");
@@ -282,7 +343,6 @@ void WdShowImage::drawGraph(const LinearProgram& lp,
     ui->plot->xAxis->setRange(minX - 3, maxX + 3);
     ui->plot->yAxis->setRange(minY - 3, maxY + 3);
 
-    // [FIX] Vẽ ra luôn bước 0 đầu tiên thay vì dùng QTimer
     renderStep(currentStepIndex);
 }
 
@@ -292,6 +352,9 @@ void WdShowImage::drawGraph(const LinearProgram& lp,
 void WdShowImage::renderStep(int stepIndex)
 {
     if (stepIndex < 0 || stepIndex >= (int)stepHistory.size()) return;
+
+    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    bool isDark = settings.value("dark_mode", false).toBool();
 
     // 1. Cập nhật đường đi Simplex
     QVector<double> pathT, pathX, pathY;
@@ -326,8 +389,7 @@ void WdShowImage::renderStep(int stepIndex)
     }
 
     // -------------------------------------------------------------------
-    // 3. CẬP NHẬT NHÃN TRẠNG THÁI
-    // (Dùng toán học để nhận dạng Vô số nghiệm thay vì bắt chữ "Điểm tối ưu thứ 2")
+    // 3. CẬP NHẬT NHÃN TRẠNG THÁI [FIX LOGIC THOÁI HÓA]
     // -------------------------------------------------------------------
     bool isInfiniteProblem = false;
     if (stepHistory.size() >= 2) {
@@ -336,8 +398,14 @@ void WdShowImage::renderStep(int stepIndex)
         double lastZ = stepHistory.back().matrix[m][n];
         double prevZ = stepHistory[stepHistory.size() - 2].matrix[m][n];
 
-        // Nếu giá trị hàm Z ở 2 bước cuối cùng bằng nhau và không bị lỗi -> đây là trường hợp vô số nghiệm
+        QPointF lastPt = getCoordinateFromStep(stepHistory.back());
+        QPointF prevPt = getCoordinateFromStep(stepHistory[stepHistory.size() - 2]);
+        // Đo lường xem tọa độ có thực sự di chuyển trên đồ thị hay không
+        double dist = std::sqrt(std::pow(lastPt.x() - prevPt.x(), 2) + std::pow(lastPt.y() - prevPt.y(), 2));
+
+        // CHỈ XÁC NHẬN VÔ SỐ NGHIỆM KHI: Z không đổi VÀ tọa độ phải thực sự di chuyển đến đỉnh mới (dist > 1e-4)
         if (std::abs(lastZ - prevZ) < 1e-9 &&
+            dist > 1e-4 &&
             !stepHistory.back().isInfeasible &&
             !stepHistory.back().isUnbounded)
         {
@@ -346,20 +414,13 @@ void WdShowImage::renderStep(int stepIndex)
     }
 
     if (stepIndex == (int)stepHistory.size() - 1) {
-        // Kiểm tra trực tiếp bằng cờ trạng thái từ Solver truyền sang
         if (currentStepInfo.isInfeasible) {
-            stepLabel->setText(
-                QString("%1\nBài toán VÔ NGHIỆM!.")
-                    .arg(currentStepInfo.stepName)
-                );
-            stepLabel->setColor(Qt::darkRed);
+            stepLabel->setText(QString("%1\nBài toán VÔ NGHIỆM!.").arg(currentStepInfo.stepName));
+            stepLabel->setColor(isDark ? QColor("#F38BA8") : Qt::darkRed);
         }
         else if (currentStepInfo.isUnbounded) {
-            stepLabel->setText(
-                QString("%1\nBài toán KHÔNG GIỚI NỘI!.")
-                    .arg(currentStepInfo.stepName)
-                );
-            stepLabel->setColor(Qt::darkRed);
+            stepLabel->setText(QString("%1\nBài toán KHÔNG GIỚI NỘI!.").arg(currentStepInfo.stepName));
+            stepLabel->setColor(isDark ? QColor("#F38BA8") : Qt::darkRed);
         }
         else {
             stepLabel->setText(
@@ -369,10 +430,9 @@ void WdShowImage::renderStep(int stepIndex)
                     .arg(currentPoint.x(), 0, 'f', 2)
                     .arg(currentPoint.y(), 0, 'f', 2)
                 );
-            stepLabel->setColor(Qt::blue);
+            stepLabel->setColor(isDark ? QColor("#89B4FA") : Qt::blue);
         }
     }
-    // Xử lý bước trước bước cuối cùng nếu có vô số nghiệm
     else if (stepIndex == (int)stepHistory.size() - 2 && isInfiniteProblem) {
         stepLabel->setText(
             QString("%1\nTọa độ tối ưu thứ nhất: (%2, %3)")
@@ -380,7 +440,7 @@ void WdShowImage::renderStep(int stepIndex)
                 .arg(currentPoint.x(), 0, 'f', 2)
                 .arg(currentPoint.y(), 0, 'f', 2)
             );
-        stepLabel->setColor(Qt::blue); // Dùng màu xanh lam giống tọa độ tối ưu
+        stepLabel->setColor(isDark ? QColor("#89B4FA") : Qt::blue);
     }
     else {
         stepLabel->setText(
@@ -389,7 +449,7 @@ void WdShowImage::renderStep(int stepIndex)
                 .arg(currentPoint.x(), 0, 'f', 2)
                 .arg(currentPoint.y(), 0, 'f', 2)
             );
-        stepLabel->setColor(Qt::darkMagenta);
+        stepLabel->setColor(isDark ? QColor("#CBA6F7") : Qt::darkMagenta);
     }
 
     // 4. Update hiển thị các nút bấm

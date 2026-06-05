@@ -1,5 +1,6 @@
 #include "simplexsolver.h"
 #include <set>
+#include <cmath>
 
 static const double CLEAN_EPS = 1e-10;
 
@@ -58,9 +59,6 @@ std::vector<double> SimplexSolver::getAltSolution() const {
 
 QString SimplexSolver::getStatus() const { return this->statusMsg; }
 
-// -----------------------------------------------------------------------
-// CHUẨN HÓA BÀI TOÁN VỀ DẠNG CHÍNH TẮC
-// -----------------------------------------------------------------------
 void SimplexSolver::convertToStandardForm() {
     this->originalVarsCount = lp.c.size();
     this->originalVarBounds = lp.varBounds;
@@ -78,8 +76,6 @@ void SimplexSolver::convertToStandardForm() {
             lp.b[i] = -lp.b[i];
             for (int j = 0; j < (int)lp.A[i].size(); ++j)
                 lp.A[i][j] = -lp.A[i][j];
-        } else if (lp.signs[i] == "=" || lp.signs[i] == "==") {
-            lp.signs[i] = "<=";
         }
     }
 
@@ -109,24 +105,60 @@ void SimplexSolver::handleVariableBounds() {
     }
 }
 
+// -----------------------------------------------------------------------
+// Tự động nhận diện ma trận
+// -----------------------------------------------------------------------
 void SimplexSolver::addSlackAndSurplusVariables() {
     int m = lp.signs.size();
     this->basicVariables.assign(m, -1);
 
     for (int i = 0; i < m; ++i) {
-        if (lp.signs[i] == "<=") {
-            for (int row = 0; row < m; ++row)
-                lp.A[row].push_back((row == i) ? 1.0 : 0.0);
-            lp.c.push_back(0.0);
-            basicVariables[i] = lp.c.size() - 1;
-            lp.signs[i] = "=";
+        bool foundIdentity = false;
+
+        // Nếu người dùng dùng dấu "=" và tự thiết lập ma trận đơn vị cho biến
+        if (lp.signs[i] == "=" || lp.signs[i] == "==") {
+            for (size_t j = 0; j < lp.c.size(); ++j) {
+                // Kiểm tra hệ số bằng 1 và Cost (Z) phải bằng 0
+                if (std::abs(lp.A[i][j] - 1.0) < CLEAN_EPS && std::abs(lp.c[j]) < CLEAN_EPS) {
+                    bool isBasicCol = true;
+                    // Kiểm tra xem các hàng khác có bằng 0 hay không
+                    for (int r = 0; r < m; ++r) {
+                        if (r != i && std::abs(lp.A[r][j]) > CLEAN_EPS) {
+                            isBasicCol = false;
+                            break;
+                        }
+                    }
+                    if (isBasicCol) {
+                        // Đảm bảo biến này chưa được cột nào xí chỗ trước
+                        bool alreadyUsed = false;
+                        for(int r = 0; r < i; ++r) {
+                            if (basicVariables[r] == (int)j) alreadyUsed = true;
+                        }
+                        if (!alreadyUsed) {
+                            basicVariables[i] = j;
+                            foundIdentity = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Nếu không tìm thấy cột đơn vị, ta mới áp dụng logic mặc định (thêm biến phụ)
+        if (!foundIdentity) {
+            if (lp.signs[i] == "<=" || lp.signs[i] == "=" || lp.signs[i] == "==") {
+                for (int row = 0; row < m; ++row)
+                    lp.A[row].push_back((row == i) ? 1.0 : 0.0);
+                lp.c.push_back(0.0);
+                basicVariables[i] = lp.c.size() - 1;
+                lp.signs[i] = "=";
+            }
+        } else {
+            lp.signs[i] = "="; // Chuẩn hóa lại dấu
         }
     }
 }
 
-// -----------------------------------------------------------------------
-// THUẬT TOÁN ĐƠN HÌNH CHÍNH
-// -----------------------------------------------------------------------
 bool SimplexSolver::solve() {
     convertToStandardForm();
 
@@ -138,7 +170,7 @@ bool SimplexSolver::solve() {
     if (needsPhase1) {
         if (lp.algoType == 0 || lp.algoType == 1) {
             statusMsg = "Không giải được với thuật toán Đơn hình! "
-                        "(Bài toán có ràng buộc >= hoặc = cần dùng 2 Pha hoặc Tự động).";
+                        "(Tồn tại hệ số b_i âm ở dạng chuẩn, bạn có thể sử dụng đơn hình 2 pha hoặc chế độ tự động).";
             return false;
         }
         return solveTwoPhase();
@@ -269,7 +301,6 @@ bool SimplexSolver::runSimplexLoop(bool isPhaseOne) {
         int pivotRow = findPivotRow(pivotCol);
         if (pivotRow == -1) {
             statusMsg = "Bài toán không giới nội";
-            // [THÊM MỚI]: Bật cờ Không giới nội cho bước hiện tại để UI vẽ hình nhận diện được
             if (!history.empty()) {
                 history.back().isUnbounded = true;
             }
@@ -283,9 +314,6 @@ bool SimplexSolver::runSimplexLoop(bool isPhaseOne) {
     }
 }
 
-// -----------------------------------------------------------------------
-// THUẬT TOÁN HAI PHA (1 BIẾN PHỤ)
-// -----------------------------------------------------------------------
 bool SimplexSolver::solveTwoPhase() {
     int m = lp.A.size();
     int n_slack = lp.c.size();
@@ -305,7 +333,6 @@ bool SimplexSolver::solveTwoPhase() {
         tableau[i][a_col] = -1.0;
     }
 
-    // [FIX TOÁN HỌC] Trả lại hệ số +1.0 cho x0 để thuật toán nhận diện đúng cột trục
     for (int j = 0; j <= cols; ++j) tableau[m][j] = 0.0;
     tableau[m][a_col] = 1.0;
 
@@ -332,16 +359,12 @@ bool SimplexSolver::solveTwoPhase() {
 
     if (std::abs(tableau[m][cols]) > CLEAN_EPS) {
         statusMsg = "Vô nghiệm (Min ε > 0)";
-        // [THÊM MỚI]: Bật cờ Vô nghiệm cho bước hiện tại để UI vẽ hình nhận diện được
         if (!history.empty()) {
             history.back().isInfeasible = true;
         }
         return false;
     }
 
-    // -----------------------------------------
-    // --- PHA 2: CHUYỂN TIẾP ---
-    // -----------------------------------------
     iterationCount = 0;
 
     for (int j = 0; j < n_slack; ++j) {
