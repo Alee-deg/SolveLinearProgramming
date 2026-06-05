@@ -35,7 +35,10 @@ static void verifyAndSaveApiKey(WdChatBot* parentWindow, QTextEdit* chatDisplay,
         if (isValid) {
             QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
             settings.setValue("api_key", newKey);
-            chatDisplay->append("<div style='color: #89B4FA; margin-bottom: 5px;'><b>Hệ thống:</b> API Key đã được cập nhật thành công!</div>");
+            bool isDark = settings.value("dark_mode", false).toBool();
+            QString sysColor = isDark ? "#A6E3A1" : "#28A745"; // Xanh lá cây sáng/tối
+
+            chatDisplay->append(QString("<div style='color: %1; margin-bottom: 5px;'><b>Hệ thống:</b> API Key đã được cập nhật thành công!</div>").arg(sysColor));
         } else {
             QMessageBox::critical(parentWindow, "Lỗi xác thực", "API Key không hợp lệ, vui lòng kiểm tra lại!");
         }
@@ -52,6 +55,7 @@ WdChatBot::WdChatBot(QWidget *parent)
     ui->setupUi(this);
     this->isFirstMessage = true;
 
+    // KHÔNG SỬ DỤNG setStyleSheet CỤC BỘ Ở ĐÂY NỮA ĐỂ KẾ THỪA CSS TỪ MAINWINDOW
     menuBar()->hide();
 
     connect(ui->inputField, &QLineEdit::returnPressed, this, &WdChatBot::onUserSendMessage);
@@ -82,7 +86,6 @@ void WdChatBot::onUserSendMessage() {
                                                QLineEdit::Password,
                                                currentKey, &ok);
         if (ok && !newKey.trimmed().isEmpty()) {
-            // [ÁP DỤNG MỚI] Đưa vào hàm kiểm tra trước khi lưu
             verifyAndSaveApiKey(this, ui->chatDisplay, newKey.trimmed(), nullptr);
         }
         return;
@@ -93,13 +96,17 @@ void WdChatBot::onUserSendMessage() {
         isFirstMessage = false;
     }
 
+    // LẤY MÀU ĐỘNG CHO CHỮ CỦA USER
+    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    bool isDark = settings.value("dark_mode", false).toBool();
+    QString userColor = isDark ? "#89B4FA" : "#0055ff"; // Xanh dương sáng (Tối) hoặc Xanh dương đậm (Sáng)
+
     // In tin nhắn của người dùng
-    ui->chatDisplay->append("<div style='margin-bottom: 5px; color: #0055ff;'>"
-                            "<b>Bạn:</b> " + userMessage +
-                            "</div>");
+    ui->chatDisplay->append(QString("<div style='margin-bottom: 5px; color: %1;'>"
+                                    "<b>Bạn:</b> %2"
+                                    "</div>").arg(userColor, userMessage));
 
     ui->inputField->clear();
-
     ui->inputField->setPlaceholderText("AI đang suy nghĩ...");
     ui->inputField->setEnabled(false);
 
@@ -111,6 +118,12 @@ void WdChatBot::askGroq(const QString& question) {
     QString iniPath = QCoreApplication::applicationDirPath() + "/settings.ini";
     QSettings settings(iniPath, QSettings::IniFormat);
     QString apiKey = settings.value("api_key", "").toString().trimmed();
+    bool isDark = settings.value("dark_mode", false).toBool();
+
+    // LẤY MÀU ĐỘNG CHO BOT, HỆ THỐNG VÀ LỖI
+    QString botColor = isDark ? "#FFFFFF" : "#222222"; // Trắng (Tối) hoặc Đen đậm (Sáng)
+    QString sysColor = isDark ? "#F9E2AF" : "#E67E22"; // Vàng cam sáng (Tối) hoặc Cam (Sáng)
+    QString errColor = isDark ? "#F38BA8" : "#D32F2F"; // Đỏ nhạt (Tối) hoặc Đỏ đậm (Sáng)
 
     // XỬ LÝ TỰ ĐỘNG HỎI NẾU KEY TRỐNG
     if (apiKey.isEmpty()) {
@@ -119,29 +132,26 @@ void WdChatBot::askGroq(const QString& question) {
                                                "Bạn chưa thiết lập API Key.\nVui lòng dán mã API Key của Groq để kích hoạt Chatbot:",
                                                QLineEdit::Password, "", &ok);
         if (ok && !newKey.trimmed().isEmpty()) {
-            // [ÁP DỤNG MỚI] Đưa vào hàm kiểm tra
             verifyAndSaveApiKey(this, ui->chatDisplay, newKey.trimmed(), [this, question](bool isValid) {
                 if (isValid) {
-                    // Nếu Key chuẩn, gọi vòng lặp lại hàm askGroq để đi chat tiếp!
                     this->askGroq(question);
                 } else {
-                    // Mở lại khung chat nếu key lỗi
                     ui->inputField->setEnabled(true);
                     ui->inputField->setPlaceholderText("Nhập câu hỏi của bạn . . .");
                     ui->inputField->setFocus();
                 }
             });
         } else {
-            ui->chatDisplay->append("<div style='color: #E67E22; margin-bottom: 15px;'>"
-                                    "<b>Hệ thống:</b> Bạn chưa nhập API Key nên Chatbot không thể hoạt động.<br>"
-                                    "<i>(Bạn có thể cài đặt lại ở menu <b>⚙️ Cài đặt</b> trên góc màn hình, hoặc gõ lệnh <b>/key</b> vào khung chat)</i>"
-                                    "</div>");
+            ui->chatDisplay->append(QString("<div style='color: %1; margin-bottom: 15px;'>"
+                                            "<b>Hệ thống:</b> Bạn chưa nhập API Key nên Chatbot không thể hoạt động.<br>"
+                                            "<i>(Bạn có thể gõ lệnh <b>/key</b> vào khung chat để cấu hình lại)</i>"
+                                            "</div>").arg(sysColor));
 
             ui->inputField->setEnabled(true);
             ui->inputField->setPlaceholderText("Nhập câu hỏi của bạn . . .");
             ui->inputField->setFocus();
         }
-        return; // Phải dừng lại chờ tín hiệu mạng Async phản hồi
+        return;
     }
 
     QNetworkAccessManager *manager = new QNetworkAccessManager(this);
@@ -176,7 +186,7 @@ void WdChatBot::askGroq(const QString& question) {
 
     QNetworkReply *reply = manager->post(request, QJsonDocument(body).toJson());
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, botColor, errColor, manager]() {
         // Mở khóa thanh nhập liệu
         ui->inputField->setEnabled(true);
         ui->inputField->setPlaceholderText("Nhập câu hỏi của bạn . . .");
@@ -190,27 +200,29 @@ void WdChatBot::askGroq(const QString& question) {
             QString answer = root["choices"].toArray()[0].toObject()["message"].toObject()["content"].toString();
             answer.replace("\n", "<br>");
 
-            ui->chatDisplay->append("<div style='margin-bottom: 15px; color: #222222;'>"
-                                    "<b>Bot:</b> " + answer +
-                                    "</div>");
+            // In tin nhắn của Bot với màu động (Trắng ở Dark mode)
+            ui->chatDisplay->append(QString("<div style='margin-bottom: 15px; color: %1;'>"
+                                            "<b>Bot:</b> %2"
+                                            "</div>").arg(botColor, answer));
         } else {
             QByteArray errorData = reply->readAll();
             QString errorMessage = QString::fromUtf8(errorData);
 
             if (errorMessage.contains("invalid_api_key", Qt::CaseInsensitive) || errorMessage.contains("Invalid API Key", Qt::CaseInsensitive)) {
-                ui->chatDisplay->append("<div style='color: #D32F2F; margin-bottom: 15px;'>"
-                                        "<b>Lỗi xác thực:</b> API Key của bạn bị sai, không hợp lệ hoặc đã bị khóa!<br>"
-                                        "<i>&rarr; Vui lòng gõ lệnh <b>/key</b>) vào thanh chat để sửa lại Key.</i>"
-                                        "</div>");
+                ui->chatDisplay->append(QString("<div style='color: %1; margin-bottom: 15px;'>"
+                                                "<b>Lỗi xác thực:</b> API Key của bạn bị sai, không hợp lệ hoặc đã bị khóa!<br>"
+                                                "<i>&rarr; Vui lòng gõ lệnh <b>/key</b> vào thanh chat để sửa lại Key.</i>"
+                                                "</div>").arg(errColor));
             } else {
-                ui->chatDisplay->append("<div style='color: #D32F2F; margin-bottom: 15px;'>"
-                                        "<b>Lỗi mạng:</b> " + reply->errorString() + "<br>"
-                                                                 "<b>Chi tiết lỗi:</b> " + errorMessage +
-                                        "</div>");
+                ui->chatDisplay->append(QString("<div style='color: %1; margin-bottom: 15px;'>"
+                                                "<b>Lỗi mạng:</b> %2<br>"
+                                                "<b>Chi tiết lỗi:</b> %3"
+                                                "</div>").arg(errColor, reply->errorString(), errorMessage));
             }
         }
 
         reply->deleteLater();
+        manager->deleteLater();
     });
 }
 

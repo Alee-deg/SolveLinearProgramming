@@ -28,6 +28,7 @@
 #include <QLabel>
 #include <QDateTime>
 #include <QSettings>
+#include <QStandardPaths>
 
 // =======================================================================
 // Cấu trúc bọc bài toán kèm theo thời gian giải
@@ -38,6 +39,16 @@ struct HistoryEntry {
 };
 
 static std::deque<HistoryEntry> g_undoStack;
+
+// HÀM TẠO ĐƯỜNG DẪN AN TOÀN
+static QString getAppDataPath() {
+    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir dir;
+    if (!dir.exists(dataDir)) {
+        dir.mkpath(dataDir);
+    }
+    return dataDir;
+}
 
 static void saveHistoryToJson() {
     QJsonArray historyArray;
@@ -79,7 +90,8 @@ static void saveHistoryToJson() {
         historyArray.append(obj);
     }
 
-    QString filePath = QCoreApplication::applicationDirPath() + "/history.json";
+    // LƯU VÀO APPDATA
+    QString filePath = getAppDataPath() + "/history.json";
     QFile file(filePath);
     if (file.open(QIODevice::WriteOnly)) {
         QJsonDocument doc(historyArray);
@@ -89,7 +101,8 @@ static void saveHistoryToJson() {
 }
 
 static void loadHistoryFromJson() {
-    QString filePath = QCoreApplication::applicationDirPath() + "/history.json";
+    // ĐỌC TỪ APPDATA
+    QString filePath = getAppDataPath() + "/history.json";
     QFile file(filePath);
     if (!file.exists() || !file.open(QIODevice::ReadOnly)) return;
 
@@ -318,10 +331,9 @@ Dashboard::Dashboard(QWidget *parent)
             historyDialog.setWindowTitle("Lịch sử giải bài toán");
             historyDialog.resize(600, 450);
 
-            // =======================================================================
-            // [FIX MỚI] ĐỌC SETTINGS VÀ ÉP CỨNG GIAO DIỆN LỊCH SỬ
-            // =======================================================================
-            QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+            // ĐỌC SETTINGS TỪ APPDATA
+            QString iniPath = getAppDataPath() + "/settings.ini";
+            QSettings settings(iniPath, QSettings::IniFormat);
             bool isDark = settings.value("dark_mode", false).toBool();
 
             if (isDark) {
@@ -365,7 +377,6 @@ Dashboard::Dashboard(QWidget *parent)
                     dateHeader->setFlags(dateHeader->flags() & ~Qt::ItemIsSelectable);
                     dateHeader->setData(Qt::UserRole, -1);
 
-                    // Gán màu tĩnh cho Header Ngày tháng tùy chế độ
                     if (isDark) {
                         dateHeader->setBackground(QColor("#313244"));
                         dateHeader->setForeground(QColor("#A6ADC8"));
@@ -422,7 +433,6 @@ Dashboard::Dashboard(QWidget *parent)
             QPushButton *btnRestore = new QPushButton("Tải lại dữ liệu", &historyDialog);
             QPushButton *btnCancel = new QPushButton("Hủy bỏ", &historyDialog);
 
-            // Gán màu tĩnh cho Nút bấm tùy chế độ
             if (isDark) {
                 btnCancel->setStyleSheet("QPushButton { background-color: #313244; color: #CDD6F4; border: 1px solid #45475A; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #45475A; }");
                 btnRestore->setStyleSheet("QPushButton { background-color: #89B4FA; color: #1E1E2E; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #B4BEFE; }");
@@ -532,7 +542,6 @@ Dashboard::~Dashboard()
     delete ui;
 }
 
-// KHÔNG DÙNG setStyleSheet Ở ĐÂY NỮA, ĐỂ CHÚNG TỰ ĂN THEO CSS CỦA MAINWINDOW
 MathInput* Dashboard::createSpinBox(QWidget *parent) {
     MathInput *input = new MathInput(parent);
     input->setValue(0.0);
@@ -866,16 +875,17 @@ void Dashboard::on_btn_HuongDan_clicked()
     dialog.setWindowTitle("Hướng dẫn sử dụng");
     dialog.resize(800, 620);
 
-    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    QString iniPath = getAppDataPath() + "/settings.ini";
+    QSettings settings(iniPath, QSettings::IniFormat);
     bool isDark = settings.value("dark_mode", false).toBool();
 
-    // =======================================================================
-    // [FIX] BẤT CHẤP HỆ THỐNG UBUNTU, ÉP CỨNG MÀU NỀN CỦA DIALOG VÀ SCROLL AREA
-    // =======================================================================
+    // [FIX MỚI] Gán luôn màu chữ mặc định cho mọi thứ bên trong QDialog để tránh hiện tượng chữ nhạt hòa vào nền
     if (isDark) {
-        dialog.setStyleSheet("QDialog, QScrollArea, QWidget#scrollAreaWidgetContents { background-color: #1E1E2E; border: none; }");
+        dialog.setStyleSheet("QDialog, QScrollArea, QWidget#scrollAreaWidgetContents { background-color: #1E1E2E; border: none; } "
+                             "QLabel { color: #CDD6F4; }");
     } else {
-        dialog.setStyleSheet("QDialog, QScrollArea, QWidget#scrollAreaWidgetContents { background-color: #F5F7FA; border: none; }");
+        dialog.setStyleSheet("QDialog, QScrollArea, QWidget#scrollAreaWidgetContents { background-color: #F5F7FA; border: none; } "
+                             "QLabel { color: #333333; }");
     }
 
     QVBoxLayout *mainLayout = new QVBoxLayout(&dialog);
@@ -906,7 +916,10 @@ void Dashboard::on_btn_HuongDan_clicked()
     QLabel *textLabel = new QLabel();
     textLabel->setTextFormat(Qt::RichText);
     textLabel->setWordWrap(true);
-    textLabel->setStyleSheet("font-size: 15px; line-height: 1.6;");
+
+    // [FIX MỚI] Bổ sung tham số color tương ứng Sáng/Tối cho textLabel
+    textLabel->setStyleSheet(isDark ? "font-size: 15px; line-height: 1.6; color: #CDD6F4;"
+                                    : "font-size: 15px; line-height: 1.6; color: #333333;");
     textLabel->setOpenExternalLinks(true);
 
     QString guideText = R"(
@@ -947,7 +960,6 @@ void Dashboard::on_btn_HuongDan_clicked()
         </p>
     )";
 
-    // Tự động biến đổi màu mã HTML cho chuẩn với nền Dark Mode
     if (isDark) {
         guideText.replace("#E8E8E8", "#313244");
         guideText.replace("#CCCCCC", "#45475A");
