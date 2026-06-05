@@ -360,90 +360,106 @@ Dashboard::Dashboard(QWidget *parent)
             layout->addWidget(lblTitle);
 
             QListWidget *listWidget = new QListWidget(&historyDialog);
-            QString currentDateStr = "";
 
-            for (int i = (int)g_undoStack.size() - 1; i >= 0; --i) {
-                const HistoryEntry& entry = g_undoStack[i];
-                const LinearProgram& lp_item = entry.lp;
+            // Hàm làm mới danh sách (Dùng cho cả lúc mới mở & lúc xóa mục)
+            auto populateList = [&]() {
+                listWidget->clear();
+                QString currentDateStr = "";
 
-                QString itemDate = entry.timestamp.date().toString("dd/MM/yyyy");
-                QString itemTime = entry.timestamp.time().toString("HH:mm:ss");
+                for (int i = (int)g_undoStack.size() - 1; i >= 0; --i) {
+                    const HistoryEntry& entry = g_undoStack[i];
+                    const LinearProgram& lp_item = entry.lp;
 
-                if (itemDate != currentDateStr) {
-                    QListWidgetItem *dateHeader = new QListWidgetItem("📅 Ngày: " + itemDate);
-                    QFont f = dateHeader->font();
-                    f.setBold(true);
-                    dateHeader->setFont(f);
-                    dateHeader->setFlags(dateHeader->flags() & ~Qt::ItemIsSelectable);
-                    dateHeader->setData(Qt::UserRole, -1);
+                    QString itemDate = entry.timestamp.date().toString("dd/MM/yyyy");
+                    QString itemTime = entry.timestamp.time().toString("HH:mm:ss");
 
-                    if (isDark) {
-                        dateHeader->setBackground(QColor("#313244"));
-                        dateHeader->setForeground(QColor("#A6ADC8"));
-                    } else {
-                        dateHeader->setBackground(QColor("#E4E7EB"));
-                        dateHeader->setForeground(QColor("#333333"));
+                    if (itemDate != currentDateStr) {
+                        QListWidgetItem *dateHeader = new QListWidgetItem("📅 Ngày: " + itemDate);
+                        QFont f = dateHeader->font();
+                        f.setBold(true);
+                        dateHeader->setFont(f);
+                        dateHeader->setFlags(dateHeader->flags() & ~Qt::ItemIsSelectable);
+                        dateHeader->setData(Qt::UserRole, -1);
+
+                        if (isDark) {
+                            dateHeader->setBackground(QColor("#313244"));
+                            dateHeader->setForeground(QColor("#A6ADC8"));
+                        } else {
+                            dateHeader->setBackground(QColor("#E4E7EB"));
+                            dateHeader->setForeground(QColor("#333333"));
+                        }
+
+                        listWidget->addItem(dateHeader);
+                        currentDateStr = itemDate;
                     }
 
-                    listWidget->addItem(dateHeader);
-                    currentDateStr = itemDate;
-                }
+                    QString optStr = lp_item.isMaximize ? "Max Z =" : "Min Z =";
+                    int vars = lp_item.c.size();
+                    int constraints = lp_item.A.size();
 
-                QString optStr = lp_item.isMaximize ? "Max Z =" : "Min Z =";
-                int vars = lp_item.c.size();
-                int constraints = lp_item.A.size();
-
-                QString zExpr = "";
-                bool isFirst = true;
-                if (std::abs(lp_item.c_0) > 1e-9) {
-                    zExpr += QString::number(lp_item.c_0, 'g', 4);
-                    isFirst = false;
-                }
-                for (size_t j = 0; j < lp_item.c.size(); ++j) {
-                    double val = lp_item.c[j];
-                    if (std::abs(val) > 1e-9) {
-                        if (!isFirst) {
-                            zExpr += (val > 0) ? " + " : " - ";
-                        } else {
-                            if (val < 0) zExpr += "-";
-                        }
-                        zExpr += QString::number(std::abs(val), 'g', 4) + "x" + QString::number(j + 1);
+                    QString zExpr = "";
+                    bool isFirst = true;
+                    if (std::abs(lp_item.c_0) > 1e-9) {
+                        zExpr += QString::number(lp_item.c_0, 'g', 4);
                         isFirst = false;
                     }
+                    for (size_t j = 0; j < lp_item.c.size(); ++j) {
+                        double val = lp_item.c[j];
+                        if (std::abs(val) > 1e-9) {
+                            if (!isFirst) {
+                                zExpr += (val > 0) ? " + " : " - ";
+                            } else {
+                                if (val < 0) zExpr += "-";
+                            }
+                            zExpr += QString::number(std::abs(val), 'g', 4) + "x" + QString::number(j + 1);
+                            isFirst = false;
+                        }
+                    }
+                    if (zExpr.isEmpty()) zExpr = "0";
+
+                    QString desc = QString("   ▶ [%1] : [%2 %3] | %4 Biến, %5 Ràng buộc")
+                                       .arg(itemTime).arg(optStr).arg(zExpr).arg(vars).arg(constraints);
+
+                    QListWidgetItem *item = new QListWidgetItem(desc);
+                    item->setData(Qt::UserRole, i);
+                    listWidget->addItem(item);
                 }
-                if (zExpr.isEmpty()) zExpr = "0";
 
-                QString desc = QString("   ▶ [%1] : [%2 %3] | %4 Biến, %5 Ràng buộc")
-                                   .arg(itemTime).arg(optStr).arg(zExpr).arg(vars).arg(constraints);
-
-                QListWidgetItem *item = new QListWidgetItem(desc);
-                item->setData(Qt::UserRole, i);
-                listWidget->addItem(item);
-            }
-
-            for(int i = 0; i < listWidget->count(); ++i) {
-                if (listWidget->item(i)->data(Qt::UserRole).toInt() != -1) {
-                    listWidget->setCurrentRow(i);
-                    break;
+                // Tự động focus dòng đầu tiên hợp lệ
+                for(int i = 0; i < listWidget->count(); ++i) {
+                    if (listWidget->item(i)->data(Qt::UserRole).toInt() != -1) {
+                        listWidget->setCurrentRow(i);
+                        break;
+                    }
                 }
-            }
+            };
+
+            // Gọi hàm render danh sách
+            populateList();
             layout->addWidget(listWidget);
 
+            // GIAO DIỆN NÚT BẤM (Đã thêm nút Xóa)
             QHBoxLayout *btnLayout = new QHBoxLayout();
+            QPushButton *btnDelete = new QPushButton("❌ Xóa mục chọn", &historyDialog);
             QPushButton *btnRestore = new QPushButton("Tải lại dữ liệu", &historyDialog);
             QPushButton *btnCancel = new QPushButton("Hủy bỏ", &historyDialog);
 
             if (isDark) {
                 btnCancel->setStyleSheet("QPushButton { background-color: #313244; color: #CDD6F4; border: 1px solid #45475A; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #45475A; }");
+                btnDelete->setStyleSheet("QPushButton { background-color: #F38BA8; color: #1E1E2E; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #EBA0AC; }");
                 btnRestore->setStyleSheet("QPushButton { background-color: #89B4FA; color: #1E1E2E; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #B4BEFE; }");
             } else {
                 btnCancel->setStyleSheet("QPushButton { background-color: #FFFFFF; color: #4B5563; border: 1px solid #D1D5DB; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #F3F4F6; }");
+                btnDelete->setStyleSheet("QPushButton { background-color: #D32F2F; color: #FFFFFF; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #B71C1C; }");
                 btnRestore->setStyleSheet("QPushButton { background-color: #0078D7; color: #FFFFFF; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #005A9E; }");
             }
 
             btnCancel->setCursor(Qt::PointingHandCursor);
+            btnDelete->setCursor(Qt::PointingHandCursor);
             btnRestore->setCursor(Qt::PointingHandCursor);
 
+            // Bố trí nút xóa sang trái, 2 nút kia sang phải
+            btnLayout->addWidget(btnDelete);
             btnLayout->addStretch();
             btnLayout->addWidget(btnCancel);
             btnLayout->addWidget(btnRestore);
@@ -451,6 +467,42 @@ Dashboard::Dashboard(QWidget *parent)
 
             connect(btnCancel, &QPushButton::clicked, &historyDialog, &QDialog::reject);
 
+            // CHỨC NĂNG XÓA BÀI TOÁN
+            connect(btnDelete, &QPushButton::clicked, [&]() {
+                QListWidgetItem *selectedItem = listWidget->currentItem();
+                if (selectedItem && selectedItem->data(Qt::UserRole).toInt() != -1) {
+                    int realIndex = selectedItem->data(Qt::UserRole).toInt();
+
+                    // MessageBox xác nhận xóa
+                    QMessageBox msgBox(&historyDialog);
+                    msgBox.setWindowTitle("Xác nhận");
+                    msgBox.setText("Bạn có chắc chắn muốn xóa bài toán này khỏi lịch sử?");
+                    msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+                    msgBox.setDefaultButton(QMessageBox::No);
+
+                    // Ép CSS để Box không bị lỗi đen xì trên Ubuntu
+                    if (isDark) {
+                        msgBox.setStyleSheet("QMessageBox { background-color: #1E1E2E; } QLabel { color: #CDD6F4; } QPushButton { background-color: #313244; color: #CDD6F4; border: 1px solid #45475A; border-radius: 4px; padding: 5px 15px; } QPushButton:hover { background-color: #45475A; }");
+                    } else {
+                        msgBox.setStyleSheet("QMessageBox { background-color: #F5F7FA; } QLabel { color: #333333; } QPushButton { background-color: #FFFFFF; color: #333333; border: 1px solid #CCCCCC; border-radius: 4px; padding: 5px 15px; } QPushButton:hover { background-color: #E8E8E8; }");
+                    }
+
+                    if (msgBox.exec() == QMessageBox::Yes) {
+                        g_undoStack.erase(g_undoStack.begin() + realIndex); // Xóa trong Code
+                        saveHistoryToJson(); // Lưu lại vào ổ đĩa ngay lập tức
+                        populateList();      // Làm mới lại bảng Giao Diện
+
+                        // Nếu xóa sạch rồi thì tắt luôn Dialog
+                        if (g_undoStack.empty()) {
+                            historyDialog.reject();
+                        }
+                    }
+                } else {
+                    QMessageBox::warning(&historyDialog, "Thông báo", "Vui lòng chọn một bài toán để xóa.");
+                }
+            });
+
+            // CHỨC NĂNG KHÔI PHỤC (Restore)
             auto handleRestore = [&historyDialog, listWidget]() {
                 QListWidgetItem *selectedItem = listWidget->currentItem();
                 if (selectedItem && selectedItem->data(Qt::UserRole).toInt() != -1) {
@@ -460,6 +512,7 @@ Dashboard::Dashboard(QWidget *parent)
             connect(btnRestore, &QPushButton::clicked, &historyDialog, handleRestore);
             connect(listWidget, &QListWidget::itemDoubleClicked, &historyDialog, handleRestore);
 
+            // NẾU NGƯỜI DÙNG BẤM TẢI LẠI
             if (historyDialog.exec() == QDialog::Accepted) {
                 QListWidgetItem *selectedItem = listWidget->currentItem();
                 if (!selectedItem) return;
@@ -879,7 +932,6 @@ void Dashboard::on_btn_HuongDan_clicked()
     QSettings settings(iniPath, QSettings::IniFormat);
     bool isDark = settings.value("dark_mode", false).toBool();
 
-    // [FIX MỚI] Gán luôn màu chữ mặc định cho mọi thứ bên trong QDialog để tránh hiện tượng chữ nhạt hòa vào nền
     if (isDark) {
         dialog.setStyleSheet("QDialog, QScrollArea, QWidget#scrollAreaWidgetContents { background-color: #1E1E2E; border: none; } "
                              "QLabel { color: #CDD6F4; }");
@@ -917,7 +969,6 @@ void Dashboard::on_btn_HuongDan_clicked()
     textLabel->setTextFormat(Qt::RichText);
     textLabel->setWordWrap(true);
 
-    // [FIX MỚI] Bổ sung tham số color tương ứng Sáng/Tối cho textLabel
     textLabel->setStyleSheet(isDark ? "font-size: 15px; line-height: 1.6; color: #CDD6F4;"
                                     : "font-size: 15px; line-height: 1.6; color: #333333;");
     textLabel->setOpenExternalLinks(true);

@@ -11,7 +11,7 @@
 #include <QSettings>
 #include <QCoreApplication>
 
-// THÊM 2 THƯ VIỆN NÀY ĐỂ LƯU API KEY XUYÊN HỆ ĐIỀU HÀNH
+// THÊM THƯ VIỆN ĐỂ LƯU FILE XUYÊN HỆ ĐIỀU HÀNH
 #include <QStandardPaths>
 #include <QDir>
 
@@ -25,15 +25,15 @@
 #include <functional>
 
 // =======================================================================
-// [CHỈ DÀNH CHO API] Hàm lấy đường dẫn an toàn để lưu API Key
+// Hàm lấy đường dẫn an toàn để lưu cấu hình (Settings & API Key)
 // =======================================================================
-static QString getApiKeyPath() {
+static QString getSettingsPath() {
     QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir dir;
     if (!dir.exists(dataDir)) {
         dir.mkpath(dataDir);
     }
-    return dataDir + "/apikey.ini";
+    return dataDir + "/settings.ini";
 }
 
 // =======================================================================
@@ -49,14 +49,11 @@ static void verifyAndSaveApiKey(WdChatBot* parentWindow, QTextEdit* chatDisplay,
     QObject::connect(reply, &QNetworkReply::finished, parentWindow, [=]() {
         bool isValid = (reply->error() == QNetworkReply::NoError);
         if (isValid) {
-            // 1. LƯU API KEY VÀO THƯ MỤC HỆ THỐNG ĐỂ KHÔNG BỊ MẤT
-            QSettings apiSettings(getApiKeyPath(), QSettings::IniFormat);
-            apiSettings.setValue("api_key", newKey);
+            QSettings settings(getSettingsPath(), QSettings::IniFormat);
+            settings.setValue("api_key", newKey);
 
-            // 2. GIỮ NGUYÊN CODE ĐỌC MÀU SẮC CỦA BẠN
-            QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
-            bool isDark = settings.value("dark_mode", false).toBool();
-            QString sysColor = isDark ? "#A6E3A1" : "#28A745"; // Xanh lá cây sáng/tối
+            // [FIX] Dùng màu Xanh lá tiêu chuẩn, hiển thị cực rõ trên cả 2 nền Sáng/Tối
+            QString sysColor = "#28A745";
 
             chatDisplay->append(QString("<div style='color: %1; margin-bottom: 5px;'><b>Hệ thống:</b> API Key đã được cập nhật thành công!</div>").arg(sysColor));
         } else {
@@ -96,9 +93,9 @@ void WdChatBot::onUserSendMessage() {
     // XỬ LÝ NHẬP KEY QUA LỆNH ẨN /key
     if (userMessage == "/key") {
         ui->inputField->clear();
-        // [FIX] ĐỌC API KEY TỪ THƯ MỤC HỆ THỐNG
-        QSettings apiSettings(getApiKeyPath(), QSettings::IniFormat);
-        QString currentKey = apiSettings.value("api_key", "").toString();
+        QString iniPath = getSettingsPath();
+        QSettings settings(iniPath, QSettings::IniFormat);
+        QString currentKey = settings.value("api_key", "").toString();
 
         bool ok;
         QString newKey = QInputDialog::getText(this, "Cài đặt API Key",
@@ -116,10 +113,8 @@ void WdChatBot::onUserSendMessage() {
         isFirstMessage = false;
     }
 
-    // LẤY MÀU ĐỘNG CHO CHỮ CỦA USER (GIỮ NGUYÊN CODE CỦA BẠN)
-    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
-    bool isDark = settings.value("dark_mode", false).toBool();
-    QString userColor = isDark ? "#89B4FA" : "#0055ff"; // Xanh dương sáng (Tối) hoặc Xanh dương đậm (Sáng)
+    // [FIX] Dùng màu Xanh dương trung tính (hiển thị rõ, không bị tàng hình trên nền Đen lẫn nền Trắng)
+    QString userColor = "#2563EB";
 
     // In tin nhắn của người dùng
     ui->chatDisplay->append(QString("<div style='margin-bottom: 5px; color: %1;'>"
@@ -135,19 +130,13 @@ void WdChatBot::onUserSendMessage() {
 }
 
 void WdChatBot::askGroq(const QString& question) {
-    // 1. [FIX] ĐỌC API KEY TỪ THƯ MỤC HỆ THỐNG
-    QSettings apiSettings(getApiKeyPath(), QSettings::IniFormat);
-    QString apiKey = apiSettings.value("api_key", "").toString().trimmed();
-
-    // 2. [GIỮ NGUYÊN] ĐỌC MÀU SẮC TỪ CODE CỦA BẠN
-    QString iniPath = QCoreApplication::applicationDirPath() + "/settings.ini";
+    QString iniPath = getSettingsPath();
     QSettings settings(iniPath, QSettings::IniFormat);
-    bool isDark = settings.value("dark_mode", false).toBool();
+    QString apiKey = settings.value("api_key", "").toString().trimmed();
 
-    // LẤY MÀU ĐỘNG CHO BOT, HỆ THỐNG VÀ LỖI
-    QString botColor = isDark ? "#FFFFFF" : "#222222"; // Trắng (Tối) hoặc Đen đậm (Sáng)
-    QString sysColor = isDark ? "#F9E2AF" : "#E67E22"; // Vàng cam sáng (Tối) hoặc Cam (Sáng)
-    QString errColor = isDark ? "#F38BA8" : "#D32F2F"; // Đỏ nhạt (Tối) hoặc Đỏ đậm (Sáng)
+    // [FIX] Dùng màu chung hiển thị tốt trên cả 2 nền
+    QString sysColor = "#E67E22"; // Cam
+    QString errColor = "#D32F2F"; // Đỏ
 
     // XỬ LÝ TỰ ĐỘNG HỎI NẾU KEY TRỐNG
     if (apiKey.isEmpty()) {
@@ -210,7 +199,7 @@ void WdChatBot::askGroq(const QString& question) {
 
     QNetworkReply *reply = manager->post(request, QJsonDocument(body).toJson());
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, botColor, errColor, manager]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, errColor, manager]() {
         // Mở khóa thanh nhập liệu
         ui->inputField->setEnabled(true);
         ui->inputField->setPlaceholderText("Nhập câu hỏi của bạn . . .");
@@ -224,10 +213,12 @@ void WdChatBot::askGroq(const QString& question) {
             QString answer = root["choices"].toArray()[0].toObject()["message"].toObject()["content"].toString();
             answer.replace("\n", "<br>");
 
-            // In tin nhắn của Bot với màu động (Trắng ở Dark mode)
-            ui->chatDisplay->append(QString("<div style='margin-bottom: 15px; color: %1;'>"
-                                            "<b>Bot:</b> %2"
-                                            "</div>").arg(botColor, answer));
+            // [QUAN TRỌNG NHẤT] CỐ TÌNH XÓA THẺ 'color' CỦA BOT ĐỂ NÓ HOÀN TOÀN TỰ ĐỘNG ĐỔI MÀU THEO THEME
+            // Nếu bạn chọn Theme Sáng -> Nó tự hiển thị chữ Đen
+            // Nếu bạn chọn Theme Tối -> Nó tự hiển thị chữ Trắng ngay lập tức
+            ui->chatDisplay->append(QString("<div style='margin-bottom: 15px;'>"
+                                            "<b>Bot:</b> %1"
+                                            "</div>").arg(answer));
         } else {
             QByteArray errorData = reply->readAll();
             QString errorMessage = QString::fromUtf8(errorData);
