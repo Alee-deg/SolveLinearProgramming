@@ -16,6 +16,7 @@
 #include <QRegularExpression>
 #include <QWheelEvent>
 #include <deque>
+#include <algorithm> // Bổ sung thư viện để sort mảng khi xóa nhiều dòng
 
 #include <QFile>
 #include <QJsonDocument>
@@ -29,6 +30,8 @@
 #include <QDateTime>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QCompleter>
+#include <QStringListModel>
 
 // =======================================================================
 // Cấu trúc bọc bài toán kèm theo thời gian giải
@@ -39,6 +42,10 @@ struct HistoryEntry {
 };
 
 static std::deque<HistoryEntry> g_undoStack;
+
+// Khi người dùng tải lại một bài toán từ lịch sử, chỉ đánh dấu vị trí cũ.
+// Không lưu lại ngay; chỉ thay thế lịch sử khi người dùng bấm Solve.
+static int g_pendingRestoreIndex = -1;
 
 // HÀM TẠO ĐƯỜNG DẪN AN TOÀN
 static QString getAppDataPath() {
@@ -329,7 +336,7 @@ Dashboard::Dashboard(QWidget *parent)
 
             QDialog historyDialog(this);
             historyDialog.setWindowTitle("Lịch sử giải bài toán");
-            historyDialog.resize(600, 450);
+            historyDialog.resize(680, 450);
 
             // ĐỌC SETTINGS TỪ APPDATA
             QString iniPath = getAppDataPath() + "/settings.ini";
@@ -340,17 +347,29 @@ Dashboard::Dashboard(QWidget *parent)
                 historyDialog.setStyleSheet(
                     "QDialog { background-color: #1E1E2E; }"
                     "QLabel { color: #CDD6F4; }"
+                    "QLineEdit { background-color: #181825; color: #CDD6F4; border: 1px solid #45475A; border-radius: 5px; padding: 7px 10px; }"
+                    "QLineEdit:focus { border: 1px solid #89B4FA; }"
                     "QListWidget { background-color: #181825; color: #CDD6F4; border: 1px solid #45475A; border-radius: 4px; outline: none; }"
                     "QListWidget::item { padding: 12px; border-bottom: 1px solid #313244; }"
                     "QListWidget::item:selected { background-color: #313244; color: #89B4FA; font-weight: bold; }"
+                    // Bổ sung màu cho Checkbox
+                    "QListWidget::indicator { width: 16px; height: 16px; }"
+                    "QListWidget::indicator:unchecked { border: 1px solid #45475A; background-color: #1E1E2E; border-radius: 3px; }"
+                    "QListWidget::indicator:checked { border: 1px solid #89B4FA; background-color: #89B4FA; border-radius: 3px; image: url(:/icons/check.png); }" // Bạn có thể bỏ dòng image nếu không có icon
                     );
             } else {
                 historyDialog.setStyleSheet(
                     "QDialog { background-color: #F5F7FA; }"
                     "QLabel { color: #333333; }"
+                    "QLineEdit { background-color: #FFFFFF; color: #333333; border: 1px solid #CCCCCC; border-radius: 5px; padding: 7px 10px; }"
+                    "QLineEdit:focus { border: 1px solid #0078D7; }"
                     "QListWidget { background-color: #FFFFFF; color: #333333; border: 1px solid #CCCCCC; border-radius: 4px; outline: none; }"
                     "QListWidget::item { padding: 12px; border-bottom: 1px solid #EEEEEE; }"
                     "QListWidget::item:selected { background-color: #E6F0FA; color: #0056b3; font-weight: bold; }"
+                    // Bổ sung màu cho Checkbox
+                    "QListWidget::indicator { width: 16px; height: 16px; }"
+                    "QListWidget::indicator:unchecked { border: 1px solid #CCCCCC; background-color: #FFFFFF; border-radius: 3px; }"
+                    "QListWidget::indicator:checked { border: 1px solid #0078D7; background-color: #0078D7; border-radius: 3px; }"
                     );
             }
 
@@ -359,19 +378,124 @@ Dashboard::Dashboard(QWidget *parent)
             lblTitle->setStyleSheet("font-weight: bold; font-size: 13pt; margin-bottom: 5px;");
             layout->addWidget(lblTitle);
 
+            QLineEdit *searchEdit = new QLineEdit(&historyDialog);
+            searchEdit->setPlaceholderText("🔎 Tìm theo hàm mục tiêu, ngày (dd/MM/yyyy), giờ (HH:mm:ss)...");
+            layout->addWidget(searchEdit);
+
             QListWidget *listWidget = new QListWidget(&historyDialog);
 
-            // Hàm làm mới danh sách (Dùng cho cả lúc mới mở & lúc xóa mục)
+            auto buildObjectiveExpression = [](const LinearProgram& lp_item) -> QString {
+                QString optStr = lp_item.isMaximize ? "Max Z =" : "Min Z =";
+                QString zExpr = "";
+                bool isFirst = true;
+
+                if (std::abs(lp_item.c_0) > 1e-9) {
+                    zExpr += QString::number(lp_item.c_0, 'g', 4);
+                    isFirst = false;
+                }
+
+                for (size_t j = 0; j < lp_item.c.size(); ++j) {
+                    double val = lp_item.c[j];
+                    if (std::abs(val) > 1e-9) {
+                        if (!isFirst) {
+                            zExpr += (val > 0) ? " + " : " - ";
+                        } else {
+                            if (val < 0) zExpr += "-";
+                        }
+                        zExpr += QString::number(std::abs(val), 'g', 4) + "x" + QString::number(j + 1);
+                        isFirst = false;
+                    }
+                }
+
+                if (zExpr.isEmpty()) zExpr = "0";
+                return optStr + " " + zExpr;
+            };
+
+            auto buildHistoryDescription = [&](const HistoryEntry& entry) -> QString {
+                const LinearProgram& lp_item = entry.lp;
+                QString itemTime = entry.timestamp.time().toString("HH:mm:ss");
+                int vars = lp_item.c.size();
+                int constraints = lp_item.A.size();
+
+                return QString("   ▶ [%1] : [%2] | %3 Biến, %4 Ràng buộc")
+                    .arg(itemTime)
+                    .arg(buildObjectiveExpression(lp_item))
+                    .arg(vars)
+                    .arg(constraints);
+            };
+
+            auto buildSearchText = [&](const HistoryEntry& entry) -> QString {
+                QString date1 = entry.timestamp.date().toString("dd/MM/yyyy");
+                QString date2 = entry.timestamp.date().toString("yyyy-MM-dd");
+                QString time1 = entry.timestamp.time().toString("HH:mm:ss");
+                QString time2 = entry.timestamp.time().toString("HH:mm");
+
+                return QString("%1 %2 %3 %4 %5")
+                    .arg(date1, date2, time1, time2, buildHistoryDescription(entry));
+            };
+
+            QStringListModel *suggestionModel = new QStringListModel(&historyDialog);
+            QCompleter *historyCompleter = new QCompleter(suggestionModel, &historyDialog);
+            historyCompleter->setCaseSensitivity(Qt::CaseInsensitive);
+            historyCompleter->setCompletionMode(QCompleter::PopupCompletion);
+            historyCompleter->setMaxVisibleItems(8);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
+            historyCompleter->setFilterMode(Qt::MatchContains);
+#endif
+            searchEdit->setCompleter(historyCompleter);
+
+            auto refreshSuggestions = [&]() {
+                QStringList suggestions;
+                for (int i = (int)g_undoStack.size() - 1; i >= 0; --i) {
+                    const HistoryEntry& entry = g_undoStack[i];
+                    suggestions << buildObjectiveExpression(entry.lp);
+                    suggestions << entry.timestamp.date().toString("dd/MM/yyyy");
+                    suggestions << entry.timestamp.date().toString("yyyy-MM-dd");
+                    suggestions << entry.timestamp.time().toString("HH:mm:ss");
+                    suggestions << buildHistoryDescription(entry).trimmed();
+                }
+                suggestions.removeDuplicates();
+                suggestionModel->setStringList(suggestions);
+            };
+
+            auto isMatchedSearch = [&](const HistoryEntry& entry) -> bool {
+                QString keyword = searchEdit->text().trimmed().toLower();
+                if (keyword.isEmpty()) return true;
+
+                QString searchText = buildSearchText(entry).toLower();
+                QString searchTextNoSpace = searchText;
+                searchTextNoSpace.remove(' ');
+
+                QStringList terms = keyword.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+                for (QString term : terms) {
+                    term = term.trimmed().toLower();
+                    if (term.isEmpty()) continue;
+
+                    QString termNoSpace = term;
+                    termNoSpace.remove(' ');
+
+                    if (!searchText.contains(term) && !searchTextNoSpace.contains(termNoSpace)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            };
+
+            // Hàm làm mới danh sách (Dùng cho cả lúc mới mở, lúc tìm kiếm & lúc xóa mục)
             auto populateList = [&]() {
                 listWidget->clear();
                 QString currentDateStr = "";
+                int visibleCount = 0;
 
                 for (int i = (int)g_undoStack.size() - 1; i >= 0; --i) {
                     const HistoryEntry& entry = g_undoStack[i];
-                    const LinearProgram& lp_item = entry.lp;
+
+                    if (!isMatchedSearch(entry)) {
+                        continue;
+                    }
 
                     QString itemDate = entry.timestamp.date().toString("dd/MM/yyyy");
-                    QString itemTime = entry.timestamp.time().toString("HH:mm:ss");
 
                     if (itemDate != currentDateStr) {
                         QListWidgetItem *dateHeader = new QListWidgetItem("📅 Ngày: " + itemDate);
@@ -393,36 +517,28 @@ Dashboard::Dashboard(QWidget *parent)
                         currentDateStr = itemDate;
                     }
 
-                    QString optStr = lp_item.isMaximize ? "Max Z =" : "Min Z =";
-                    int vars = lp_item.c.size();
-                    int constraints = lp_item.A.size();
-
-                    QString zExpr = "";
-                    bool isFirst = true;
-                    if (std::abs(lp_item.c_0) > 1e-9) {
-                        zExpr += QString::number(lp_item.c_0, 'g', 4);
-                        isFirst = false;
-                    }
-                    for (size_t j = 0; j < lp_item.c.size(); ++j) {
-                        double val = lp_item.c[j];
-                        if (std::abs(val) > 1e-9) {
-                            if (!isFirst) {
-                                zExpr += (val > 0) ? " + " : " - ";
-                            } else {
-                                if (val < 0) zExpr += "-";
-                            }
-                            zExpr += QString::number(std::abs(val), 'g', 4) + "x" + QString::number(j + 1);
-                            isFirst = false;
-                        }
-                    }
-                    if (zExpr.isEmpty()) zExpr = "0";
-
-                    QString desc = QString("   ▶ [%1] : [%2 %3] | %4 Biến, %5 Ràng buộc")
-                                       .arg(itemTime).arg(optStr).arg(zExpr).arg(vars).arg(constraints);
-
-                    QListWidgetItem *item = new QListWidgetItem(desc);
+                    QListWidgetItem *item = new QListWidgetItem(buildHistoryDescription(entry));
                     item->setData(Qt::UserRole, i);
+
+                    // BẬT CHECKBOX CHO TỪNG DÒNG
+                    item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+                    item->setCheckState(Qt::Unchecked);
+
                     listWidget->addItem(item);
+                    visibleCount++;
+                }
+
+                if (visibleCount == 0) {
+                    QListWidgetItem *emptyItem = new QListWidgetItem("Không tìm thấy bài toán phù hợp với từ khóa tìm kiếm.");
+                    emptyItem->setData(Qt::UserRole, -1);
+                    emptyItem->setFlags(emptyItem->flags() & ~Qt::ItemIsSelectable);
+                    if (isDark) {
+                        emptyItem->setForeground(QColor("#A6ADC8"));
+                    } else {
+                        emptyItem->setForeground(QColor("#6B7280"));
+                    }
+                    listWidget->addItem(emptyItem);
+                    return;
                 }
 
                 // Tự động focus dòng đầu tiên hợp lệ
@@ -434,12 +550,17 @@ Dashboard::Dashboard(QWidget *parent)
                 }
             };
 
+            refreshSuggestions();
+            connect(searchEdit, &QLineEdit::textChanged, &historyDialog, populateList);
+
             // Gọi hàm render danh sách
             populateList();
             layout->addWidget(listWidget);
 
-            // GIAO DIỆN NÚT BẤM (Đã thêm nút Xóa)
+            // GIAO DIỆN NÚT BẤM (Đã thêm nút Xóa Tất Cả)
             QHBoxLayout *btnLayout = new QHBoxLayout();
+            btnLayout->setSpacing(8);
+            QPushButton *btnClearAll = new QPushButton("🗑 Xóa tất cả", &historyDialog);
             QPushButton *btnDelete = new QPushButton("❌ Xóa mục chọn", &historyDialog);
             QPushButton *btnRestore = new QPushButton("Tải lại dữ liệu", &historyDialog);
             QPushButton *btnCancel = new QPushButton("Hủy bỏ", &historyDialog);
@@ -447,18 +568,28 @@ Dashboard::Dashboard(QWidget *parent)
             if (isDark) {
                 btnCancel->setStyleSheet("QPushButton { background-color: #313244; color: #CDD6F4; border: 1px solid #45475A; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #45475A; }");
                 btnDelete->setStyleSheet("QPushButton { background-color: #F38BA8; color: #1E1E2E; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #EBA0AC; }");
+                btnClearAll->setStyleSheet("QPushButton { background-color: #F38BA8; color: #1E1E2E; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #EBA0AC; }");
                 btnRestore->setStyleSheet("QPushButton { background-color: #89B4FA; color: #1E1E2E; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #B4BEFE; }");
             } else {
                 btnCancel->setStyleSheet("QPushButton { background-color: #FFFFFF; color: #4B5563; border: 1px solid #D1D5DB; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #F3F4F6; }");
                 btnDelete->setStyleSheet("QPushButton { background-color: #D32F2F; color: #FFFFFF; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #B71C1C; }");
+                btnClearAll->setStyleSheet("QPushButton { background-color: #D32F2F; color: #FFFFFF; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #B71C1C; }");
                 btnRestore->setStyleSheet("QPushButton { background-color: #0078D7; color: #FFFFFF; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #005A9E; }");
             }
 
             btnCancel->setCursor(Qt::PointingHandCursor);
             btnDelete->setCursor(Qt::PointingHandCursor);
+            btnClearAll->setCursor(Qt::PointingHandCursor);
             btnRestore->setCursor(Qt::PointingHandCursor);
 
+            // Ép các nút trong hộp thoại lịch sử có cùng kích thước
+            QList<QPushButton*> historyButtons = {btnClearAll, btnDelete, btnCancel, btnRestore};
+            for (QPushButton *btn : historyButtons) {
+                btn->setFixedSize(155, 38);
+            }
+
             // Bố trí nút xóa sang trái, 2 nút kia sang phải
+            btnLayout->addWidget(btnClearAll);
             btnLayout->addWidget(btnDelete);
             btnLayout->addStretch();
             btnLayout->addWidget(btnCancel);
@@ -467,60 +598,133 @@ Dashboard::Dashboard(QWidget *parent)
 
             connect(btnCancel, &QPushButton::clicked, &historyDialog, &QDialog::reject);
 
-            // CHỨC NĂNG XÓA BÀI TOÁN
-            connect(btnDelete, &QPushButton::clicked, [&]() {
-                QListWidgetItem *selectedItem = listWidget->currentItem();
-                if (selectedItem && selectedItem->data(Qt::UserRole).toInt() != -1) {
-                    int realIndex = selectedItem->data(Qt::UserRole).toInt();
+            // CHỨC NĂNG XÓA TẤT CẢ (MỚI)
+            connect(btnClearAll, &QPushButton::clicked, [&]() {
+                QMessageBox msgBox(&historyDialog);
+                msgBox.setWindowTitle("Xóa toàn bộ");
+                msgBox.setText("Bạn có chắc chắn muốn xóa TOÀN BỘ lịch sử? Hành động này không thể hoàn tác.");
+                msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+                msgBox.setDefaultButton(QMessageBox::No);
 
-                    // MessageBox xác nhận xóa
-                    QMessageBox msgBox(&historyDialog);
-                    msgBox.setWindowTitle("Xác nhận");
-                    msgBox.setText("Bạn có chắc chắn muốn xóa bài toán này khỏi lịch sử?");
-                    msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-                    msgBox.setDefaultButton(QMessageBox::No);
-
-                    // Ép CSS để Box không bị lỗi đen xì trên Ubuntu
-                    if (isDark) {
-                        msgBox.setStyleSheet("QMessageBox { background-color: #1E1E2E; } QLabel { color: #CDD6F4; } QPushButton { background-color: #313244; color: #CDD6F4; border: 1px solid #45475A; border-radius: 4px; padding: 5px 15px; } QPushButton:hover { background-color: #45475A; }");
-                    } else {
-                        msgBox.setStyleSheet("QMessageBox { background-color: #F5F7FA; } QLabel { color: #333333; } QPushButton { background-color: #FFFFFF; color: #333333; border: 1px solid #CCCCCC; border-radius: 4px; padding: 5px 15px; } QPushButton:hover { background-color: #E8E8E8; }");
-                    }
-
-                    if (msgBox.exec() == QMessageBox::Yes) {
-                        g_undoStack.erase(g_undoStack.begin() + realIndex); // Xóa trong Code
-                        saveHistoryToJson(); // Lưu lại vào ổ đĩa ngay lập tức
-                        populateList();      // Làm mới lại bảng Giao Diện
-
-                        // Nếu xóa sạch rồi thì tắt luôn Dialog
-                        if (g_undoStack.empty()) {
-                            historyDialog.reject();
-                        }
-                    }
+                if (isDark) {
+                    msgBox.setStyleSheet("QMessageBox { background-color: #1E1E2E; } QLabel { color: #CDD6F4; } QPushButton { background-color: #313244; color: #CDD6F4; border: 1px solid #45475A; border-radius: 4px; padding: 5px 15px; } QPushButton:hover { background-color: #45475A; }");
                 } else {
-                    QMessageBox::warning(&historyDialog, "Thông báo", "Vui lòng chọn một bài toán để xóa.");
+                    msgBox.setStyleSheet("QMessageBox { background-color: #F5F7FA; } QLabel { color: #333333; } QPushButton { background-color: #FFFFFF; color: #333333; border: 1px solid #CCCCCC; border-radius: 4px; padding: 5px 15px; } QPushButton:hover { background-color: #E8E8E8; }");
+                }
+
+                if (msgBox.exec() == QMessageBox::Yes) {
+                    g_undoStack.clear();
+                    saveHistoryToJson();
+                    historyDialog.reject(); // Đóng luôn cửa sổ vì hết lịch sử
+                }
+            });
+
+            // CHỨC NĂNG XÓA MỤC ĐÃ CHỌN (TÍCH CHECKBOX)
+            connect(btnDelete, &QPushButton::clicked, [&]() {
+                std::vector<int> toDelete;
+
+                // Lấy tất cả các dòng đã được đánh dấu tick
+                for(int i = 0; i < listWidget->count(); ++i) {
+                    QListWidgetItem* item = listWidget->item(i);
+                    if (item->data(Qt::UserRole).toInt() != -1 && item->checkState() == Qt::Checked) {
+                        toDelete.push_back(item->data(Qt::UserRole).toInt());
+                    }
+                }
+
+                if (toDelete.empty()) {
+                    QMessageBox::warning(&historyDialog, "Thông báo", "Vui lòng chọn (đánh dấu tick) ít nhất một bài toán để xóa.");
+                    return;
+                }
+
+                QMessageBox msgBox(&historyDialog);
+                msgBox.setWindowTitle("Xác nhận");
+                msgBox.setText(QString("Bạn có chắc chắn muốn xóa %1 bài toán đã chọn khỏi lịch sử?").arg(toDelete.size()));
+                msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+                msgBox.setDefaultButton(QMessageBox::No);
+
+                if (isDark) {
+                    msgBox.setStyleSheet("QMessageBox { background-color: #1E1E2E; } QLabel { color: #CDD6F4; } QPushButton { background-color: #313244; color: #CDD6F4; border: 1px solid #45475A; border-radius: 4px; padding: 5px 15px; } QPushButton:hover { background-color: #45475A; }");
+                } else {
+                    msgBox.setStyleSheet("QMessageBox { background-color: #F5F7FA; } QLabel { color: #333333; } QPushButton { background-color: #FFFFFF; color: #333333; border: 1px solid #CCCCCC; border-radius: 4px; padding: 5px 15px; } QPushButton:hover { background-color: #E8E8E8; }");
+                }
+
+                if (msgBox.exec() == QMessageBox::Yes) {
+                    // Cực kỳ quan trọng: Sort giảm dần để xóa từ dưới lên, tránh xô lệch chỉ số index trong g_undoStack
+                    std::sort(toDelete.begin(), toDelete.end(), std::greater<int>());
+
+                    for (int idx : toDelete) {
+                        g_undoStack.erase(g_undoStack.begin() + idx);
+                    }
+
+                    saveHistoryToJson(); // Lưu lại vào ổ đĩa
+                    refreshSuggestions(); // Cập nhật lại gợi ý tìm kiếm
+                    populateList();       // Làm mới lại bảng
+
+                    if (g_undoStack.empty()) {
+                        historyDialog.reject();
+                    }
                 }
             });
 
             // CHỨC NĂNG KHÔI PHỤC (Restore)
-            auto handleRestore = [&historyDialog, listWidget]() {
-                QListWidgetItem *selectedItem = listWidget->currentItem();
-                if (selectedItem && selectedItem->data(Qt::UserRole).toInt() != -1) {
-                    historyDialog.accept();
+            int restoreRealIndex = -1;
+
+            auto getCheckedHistoryIndexes = [&]() -> std::vector<int> {
+                std::vector<int> checkedIndexes;
+
+                for (int i = 0; i < listWidget->count(); ++i) {
+                    QListWidgetItem *item = listWidget->item(i);
+                    if (item && item->data(Qt::UserRole).toInt() != -1 && item->checkState() == Qt::Checked) {
+                        checkedIndexes.push_back(item->data(Qt::UserRole).toInt());
+                    }
                 }
+
+                return checkedIndexes;
+            };
+
+            auto handleRestore = [&]() {
+                std::vector<int> checkedIndexes = getCheckedHistoryIndexes();
+
+                if (checkedIndexes.size() > 1) {
+                    QMessageBox::warning(
+                        &historyDialog,
+                        "Thông báo",
+                        "Bạn chỉ được tích chọn 1 bài toán để tải lại dữ liệu."
+                        "Vui lòng bỏ chọn các bài toán còn lại."
+                        );
+                    return;
+                }
+
+                if (checkedIndexes.size() == 1) {
+                    restoreRealIndex = checkedIndexes[0];
+                    historyDialog.accept();
+                    return;
+                }
+
+                QListWidgetItem *selectedItem = listWidget->currentItem();
+                if (!selectedItem || selectedItem->data(Qt::UserRole).toInt() == -1) {
+                    QMessageBox::warning(&historyDialog, "Thông báo", "Vui lòng chọn một bài toán để tải lại dữ liệu.");
+                    return;
+                }
+
+                restoreRealIndex = selectedItem->data(Qt::UserRole).toInt();
+                historyDialog.accept();
             };
             connect(btnRestore, &QPushButton::clicked, &historyDialog, handleRestore);
             connect(listWidget, &QListWidget::itemDoubleClicked, &historyDialog, handleRestore);
 
             // NẾU NGƯỜI DÙNG BẤM TẢI LẠI
             if (historyDialog.exec() == QDialog::Accepted) {
-                QListWidgetItem *selectedItem = listWidget->currentItem();
-                if (!selectedItem) return;
+                int realIndex = restoreRealIndex;
+                if (realIndex < 0 || realIndex >= (int)g_undoStack.size()) return;
 
-                int realIndex = selectedItem->data(Qt::UserRole).toInt();
-                if (realIndex == -1) return;
+                HistoryEntry selectedEntry = g_undoStack[realIndex];
+                LinearProgram lp = selectedEntry.lp;
 
-                LinearProgram lp = g_undoStack[realIndex].lp;
+                // Chỉ đánh dấu bài toán đang được tải lại.
+                // Tuyệt đối không xóa/lưu lịch sử ở bước chọn.
+                // Lịch sử chỉ được cập nhật khi người dùng bấm Solve.
+                g_pendingRestoreIndex = realIndex;
 
                 // --- BẮT ĐẦU QUÁ TRÌNH KHÔI PHỤC LÊN GIAO DIỆN CHÍNH ---
                 int n = lp.c.size();
@@ -803,6 +1007,13 @@ void Dashboard::on_pushButton_3_clicked()
     newEntry.lp = local_lp;
     newEntry.timestamp = QDateTime::currentDateTime();
 
+    // Nếu bài toán hiện tại được tải lại từ lịch sử,
+    // chỉ đến khi bấm Solve mới xóa bản ghi cũ để thay bằng bản ghi mới.
+    if (g_pendingRestoreIndex >= 0 && g_pendingRestoreIndex < (int)g_undoStack.size()) {
+        g_undoStack.erase(g_undoStack.begin() + g_pendingRestoreIndex);
+    }
+    g_pendingRestoreIndex = -1;
+
     if (g_undoStack.size() >= 10000) {
         g_undoStack.pop_front();
     }
@@ -1002,6 +1213,33 @@ void Dashboard::on_btn_HuongDan_clicked()
         <p style="margin-bottom: 20px;"><b>5. Giải bài toán:</b><br>
         &nbsp;&nbsp;&nbsp;&bull; Chọn thuật toán muốn sử dụng ở thanh menu thả xuống.<br>
         &nbsp;&nbsp;&nbsp;&bull; Nhấn nút <b style="color: #0078D7;">Solve</b> để xem chi tiết lời giải từng bước.</p>
+
+        <p style="margin-bottom: 12px;"><b>6. Sử dụng chức năng Lịch sử:</b><br>
+        &nbsp;&nbsp;&nbsp;&bull; Sau mỗi lần nhấn <b style="color: #0078D7;">Solve</b> và bài toán được giải thành công, phần mềm sẽ tự động lưu bài toán vào <b>Lịch sử</b>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Nhấn nút <b>Lịch sử</b> để mở danh sách các bài toán đã giải trước đó.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Mỗi bài toán trong lịch sử sẽ hiển thị <b>thời gian giải</b>, <b>dạng bài toán Max/Min</b>, <b>hàm mục tiêu</b>, <b>số biến</b> và <b>số ràng buộc</b>.</p>
+
+        <p style="margin-bottom: 12px;"><b>7. Tìm kiếm bài toán cũ trong Lịch sử:</b><br>
+        &nbsp;&nbsp;&nbsp;&bull; Người dùng có thể nhập từ khóa vào ô tìm kiếm để tìm lại bài toán cũ nhanh hơn.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Có thể tìm theo <b>hàm mục tiêu</b>, ví dụ: <code style="color: #0078D7;">Max Z</code>, <code style="color: #0078D7;">1x1 - 1x2</code>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Có thể tìm theo <b>ngày</b>, ví dụ: <code style="color: #0078D7;">06/06/2026</code>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Có thể tìm theo <b>giờ</b>, ví dụ: <code style="color: #0078D7;">14:07:49</code>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Khi nhập từ khóa, phần mềm sẽ tự động gợi ý các bài toán phù hợp để người dùng chọn nhanh hơn.</p>
+
+        <p style="margin-bottom: 12px;"><b>8. Tải lại một bài toán từ Lịch sử:</b><br>
+        &nbsp;&nbsp;&nbsp;&bull; Chọn một bài toán trong danh sách, sau đó nhấn <b style="color: #0078D7;">Tải lại dữ liệu</b> để đưa dữ liệu bài toán đó trở lại màn hình nhập liệu.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Người dùng cũng có thể tích chọn một bài toán rồi nhấn <b style="color: #0078D7;">Tải lại dữ liệu</b>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Nếu tích chọn nhiều hơn một bài toán, phần mềm sẽ yêu cầu người dùng chỉ chọn một bài toán để tải lại.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Sau khi tải lại, bài toán chỉ được đưa lên giao diện nhập liệu. Lịch sử <b>chưa được cập nhật ngay</b> tại bước này.</p>
+
+        <p style="margin-bottom: 12px;"><b>9. Lưu lại bài toán sau khi tải từ Lịch sử:</b><br>
+        &nbsp;&nbsp;&nbsp;&bull; Khi người dùng tải một bài toán cũ từ lịch sử, chỉnh sửa dữ liệu nếu cần, sau đó nhấn <b style="color: #0078D7;">Solve</b>, phần mềm mới cập nhật lại lịch sử.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Cách làm này giúp tránh việc lưu nhầm bài toán khi người dùng chỉ muốn xem lại dữ liệu cũ mà chưa giải lại.</p>
+
+        <p style="margin-bottom: 12px;"><b>10. Xóa lịch sử bài toán:</b><br>
+        &nbsp;&nbsp;&nbsp;&bull; Để xóa một hoặc nhiều bài toán, tích chọn các bài toán cần xóa rồi nhấn <b style="color: #D9534F;">Xóa mục chọn</b>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Để xóa toàn bộ lịch sử, nhấn <b style="color: #D9534F;">Xóa tất cả</b>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Khi xóa lịch sử, phần mềm sẽ hỏi xác nhận trước khi thực hiện để tránh xóa nhầm dữ liệu.</p>
 
         <p style="color: #666666; font-style: italic; margin-bottom: 15px;">* Nhấn nút <b>Reset</b> (mũi tên xoay) để dọn dẹp bảng và nhập bài toán mới.</p>
 

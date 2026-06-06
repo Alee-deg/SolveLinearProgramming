@@ -7,6 +7,10 @@
 #include <QTextEdit>
 #include <QSettings>
 #include <QDir>
+#include <QPushButton>
+#include <QBoxLayout>
+#include <QLayoutItem>
+#include <QSizePolicy>
 
 WdSolve::WdSolve(QWidget *parent)
     : QMainWindow(parent)
@@ -26,6 +30,64 @@ WdSolve::WdSolve(QWidget *parent)
 
     this->wd_show    = nullptr;
     this->wd_ChatBot = nullptr;
+
+    // =======================================================================
+    // [FIX] 3 NÚT DƯỚI CÙNG PHỦ HẾT CHIỀU NGANG THEO TỈ LỆ 6 : 2 : 2
+    //      - Biểu diễn hình học: 6 phần
+    //      - Hỏi/Đáp: 2 phần
+    //      - OK/Quay lại: 2 phần
+    //      - Có khoảng cách nhỏ giữa các nút
+    // =======================================================================
+    QPushButton* btnBack = this->findChild<QPushButton*>("pushButton");      // OK / Quay lại
+    QPushButton* btnDraw = this->findChild<QPushButton*>("pushButton_2");    // Biểu diễn hình học
+    QPushButton* btnChat = this->findChild<QPushButton*>("pushButton_3");    // Hỏi/Đáp
+
+    QString btnStyle = "QPushButton { font-weight: bold; padding: 8px; border-radius: 4px; }";
+
+    QList<QPushButton*> bottomButtons = { btnDraw, btnChat, btnBack };
+    for (QPushButton* btn : bottomButtons) {
+        if (!btn) continue;
+        btn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        btn->setMinimumWidth(0);
+        btn->setMaximumWidth(QWIDGETSIZE_MAX);
+        btn->setMinimumHeight(30);
+        btn->setStyleSheet(btnStyle);
+    }
+
+    // Tìm đúng layout ngang đang chứa trực tiếp 3 nút này.
+    // Sau đó bỏ các spacer cũ để 3 nút tự kéo giãn hết chiều ngang cửa sổ.
+    auto directContainsWidget = [](QLayout* layout, QWidget* widget) -> bool {
+        if (!layout || !widget) return false;
+        for (int i = 0; i < layout->count(); ++i) {
+            QLayoutItem* item = layout->itemAt(i);
+            if (item && item->widget() == widget) return true;
+        }
+        return false;
+    };
+
+    QBoxLayout* buttonLayout = nullptr;
+    for (QLayout* layout : this->findChildren<QLayout*>()) {
+        if (directContainsWidget(layout, btnDraw) &&
+            directContainsWidget(layout, btnChat) &&
+            directContainsWidget(layout, btnBack)) {
+            buttonLayout = qobject_cast<QBoxLayout*>(layout);
+            break;
+        }
+    }
+
+    if (buttonLayout && btnDraw && btnChat && btnBack) {
+        while (buttonLayout->count() > 0) {
+            QLayoutItem* item = buttonLayout->takeAt(0);
+            delete item;
+        }
+
+        buttonLayout->setContentsMargins(0, 0, 0, 0);
+        buttonLayout->setSpacing(8);
+
+        buttonLayout->addWidget(btnDraw, 6);
+        buttonLayout->addWidget(btnChat, 2);
+        buttonLayout->addWidget(btnBack, 2);
+    }
 }
 
 WdSolve::~WdSolve()
@@ -433,7 +495,7 @@ void WdSolve::displayResults(const LinearProgram& lp,
                     commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 4px; margin-top: 0px;'>&rarr; <b>Kết luận:</b> Đã đạt [TU_VUNG_BANG] tối ưu (có vô số nghiệm).</p>";
                     commonIntroHtml += "<p style='color: #0056b3; font-size: 11.5pt; margin-bottom: 15px; margin-top: 0px; font-style: italic;'>";
 
-                    commonIntroHtml += "<b>* Giải thích vô số nghiệm:</b> vì tồn tại hệ số của biến không cơ sở ở hàm mục tiêu bằng 0 nên có vô số nghiệm tối ưu.<br>";
+                    commonIntroHtml += "<b>* Giải thích vô số nghiệm:</b> vì tồn tại hệ số của biến không cơ sở ở hàm mục tiêu bằng 0 ở từ vựng tối ưu nên bài toán có vô số nghiệm tối ưu.<br>";
                     commonIntroHtml += "<b>* Giải thích cách đọc nghiệm:</b> [READ_SOLUTION]<br>";
                     commonIntroHtml += "<b>* Giải thích giá trị tối ưu:</b> [OPT_Z]<br>";
                     commonIntroHtml += "<b>* Lưu ý:</b> Bước xoay tiếp theo chỉ để tìm tọa độ tối ưu thứ 2.";
@@ -689,7 +751,6 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
         // =======================================================================
         // ÁP DỤNG DARK MODE LÊN MÃ NGUỒN HTML
-        // Thay thế toàn bộ mã màu cứng thành mã màu tối tương ứng
         // =======================================================================
         if (isDark) {
             htmlVocab.replace("color: #333333", "color: #CDD6F4");
@@ -785,45 +846,131 @@ void WdSolve::on_pushButton_3_clicked()
 {
     const LinearProgram& lp = currentOriginalLp;
 
+    // =======================================================================
+    // [FIX CHATBOT CONTEXT]
+    // Dùng ký hiệu Unicode ≤, ≥ thay cho <=, >= để QTextEdit/HTML không hiểu nhầm
+    // dấu < là thẻ HTML, đồng thời gửi đầy đủ dấu ràng buộc và vế phải cho chatbot.
+    // =======================================================================
+    auto normalizeSign = [](const QString& sign) -> QString {
+        QString s = sign.trimmed();
+        if (s == "<=") return "≤";
+        if (s == ">=") return "≥";
+        if (s == "=")  return "=";
+        if (s.compare("free", Qt::CaseInsensitive) == 0) return "free";
+        return s.isEmpty() ? "?" : s;
+    };
+
+    auto formatNumber = [](double value) -> QString {
+        if (std::abs(value) < 1e-9) value = 0.0;
+        return QString::number(value, 'g', 10);
+    };
+
+    auto buildLinearExpression = [&](const std::vector<double>& coeffs, bool keepZeroTerms = false) -> QString {
+        QString expr;
+        bool hasTerm = false;
+
+        for (size_t i = 0; i < coeffs.size(); ++i) {
+            double val = coeffs[i];
+            if (std::abs(val) < 1e-9 && !keepZeroTerms) {
+                continue;
+            }
+
+            QString varName = "x" + QString::number((int)i + 1);
+            double absVal = std::abs(val);
+            if (std::abs(absVal) < 1e-9) absVal = 0.0;
+
+            QString term = formatNumber(absVal) + "*" + varName;
+
+            if (!hasTerm) {
+                if (val < 0) expr += "-";
+                expr += term;
+                hasTerm = true;
+            } else {
+                expr += (val >= 0) ? " + " : " - ";
+                expr += term;
+            }
+        }
+
+        if (!hasTerm) expr = "0";
+        return expr;
+    };
+
     QString optType = lp.isMaximize ? "Max" : "Min";
-    QString contextString = "Loại bài toán: Tìm " + optType + " Z\n";
-    contextString += "Hàm mục tiêu: Z = ";
+    QString contextString;
 
-    bool isFirstTerm = true;
+    contextString += "THÔNG TIN BÀI TOÁN QUY HOẠCH TUYẾN TÍNH\n";
+    contextString += "Loại bài toán: Tìm " + optType + " Z\n";
+    contextString += "Số biến: " + QString::number(lp.c.size()) + "\n";
+    contextString += "Số ràng buộc chính: " + QString::number(lp.A.size()) + "\n\n";
+
+    contextString += "1) HÀM MỤC TIÊU\n";
+    contextString += optType + " Z = ";
     if (std::abs(lp.c_0) > 1e-9) {
-        contextString += QString::number(lp.c_0);
-        isFirstTerm = false;
+        contextString += formatNumber(lp.c_0);
+        if (!lp.c.empty()) {
+            contextString += " + ";
+        }
     }
-    for (size_t i = 0; i < lp.c.size(); ++i) {
-        if (!isFirstTerm && lp.c[i] >= 0) contextString += " + ";
-        contextString += QString::number(lp.c[i]) + "*x" + QString::number(i + 1);
-        isFirstTerm = false;
-    }
+    contextString += buildLinearExpression(lp.c, true) + "\n\n";
 
-    contextString += "\n\nHệ ràng buộc:\n";
+    contextString += "2) HỆ RÀNG BUỘC CHÍNH\n";
+    contextString += "Lưu ý: Mỗi ràng buộc dưới đây có đầy đủ vế trái, dấu ràng buộc và vế phải. Không được bỏ qua dấu ≤, ≥ hoặc = khi giải thích.\n";
+
     for (size_t i = 0; i < lp.A.size(); ++i) {
-        for (size_t j = 0; j < lp.A[i].size(); ++j) {
-            if (j > 0 && lp.A[i][j] >= 0) contextString += " + ";
-            contextString += QString::number(lp.A[i][j]) + "*x" + QString::number(j + 1);
-        }
-        contextString += " " + lp.signs[i] + " " + QString::number(lp.b[i]) + "\n";
+        QString sign = (i < lp.signs.size()) ? normalizeSign(lp.signs[i]) : "?";
+        QString rhs  = (i < lp.b.size()) ? formatNumber(lp.b[i]) : "?";
+
+        contextString += QString("R%1: %2 %3 %4\n")
+                             .arg((int)i + 1)
+                             .arg(buildLinearExpression(lp.A[i], true))
+                             .arg(sign)
+                             .arg(rhs);
     }
 
-    contextString += "\nRàng buộc dấu của biến:\n";
+    contextString += "\nDanh sách dấu ràng buộc theo từng dòng:\n";
+    for (size_t i = 0; i < lp.A.size(); ++i) {
+        QString sign = (i < lp.signs.size()) ? normalizeSign(lp.signs[i]) : "?";
+        contextString += QString("R%1 có dấu %2\n").arg((int)i + 1).arg(sign);
+    }
+
+    contextString += "\n3) RÀNG BUỘC DẤU CỦA BIẾN\n";
     for (size_t i = 0; i < lp.varBounds.size(); ++i) {
+        QString varName = "x" + QString::number((int)i + 1);
+
         if (lp.varBounds[i].isFree || lp.varBounds[i].sign == "free") {
-            contextString += "x" + QString::number(i + 1) + " là biến tùy ý\n";
+            contextString += varName + " là biến tự do, không bị ràng buộc dấu\n";
         } else {
-            contextString += "x" + QString::number(i + 1) + " "
-                             + lp.varBounds[i].sign + " "
-                             + QString::number(lp.varBounds[i].value) + "\n";
+            contextString += varName + " "
+                             + normalizeSign(lp.varBounds[i].sign) + " "
+                             + formatNumber(lp.varBounds[i].value) + "\n";
         }
     }
-    contextString += "\nKết quả phần mềm đã giải ra: " + ui->lineEdit_Z->text();
 
-    contextString += "\n\n--- HƯỚNG DẪN DÀNH CHO BẠN (TRỢ LÝ AI) ---\n";
+    contextString += "\n4) KẾT QUẢ PHẦN MỀM ĐÃ GIẢI RA\n";
+    contextString += "Giá trị hiển thị tại ô kết quả Z: " + ui->lineEdit_Z->text() + "\n";
+
+    if (!currentSolution.empty()) {
+        contextString += "Nghiệm tối ưu đang hiển thị:\n";
+        for (size_t i = 0; i < currentSolution.size(); ++i) {
+            contextString += QString("x%1 = %2\n")
+                                 .arg((int)i + 1)
+                                 .arg(formatNumber(currentSolution[i]));
+        }
+    }
+
+    if (!currentAltSolution.empty()) {
+        contextString += "Nghiệm tối ưu khác / nghiệm phụ nếu có:\n";
+        for (size_t i = 0; i < currentAltSolution.size(); ++i) {
+            contextString += QString("x%1 = %2\n")
+                                 .arg((int)i + 1)
+                                 .arg(formatNumber(currentAltSolution[i]));
+        }
+    }
+
+    contextString += "\n--- HƯỚNG DẪN DÀNH CHO BẠN (TRỢ LÝ AI) ---\n";
     contextString += "Bạn là một AI hỗ trợ giải đáp toán học môn Quy hoạch tuyến tính. ";
     contextString += "Bạn CHỈ được phép giải thích hoặc trả lời các câu hỏi liên quan đến nội dung bài toán quy hoạch tuyến tính ở trên, phương pháp giải, hoặc các khái niệm toán học liên quan.\n";
+    contextString += "Khi giải thích hệ ràng buộc, bắt buộc phải dùng đúng dấu ràng buộc đã cung cấp trong từng dòng R1, R2, ... Không được tự đổi chiều dấu và không được bỏ mất vế phải.\n";
     contextString += "QUAN TRỌNG: Nếu người dùng hỏi bất kỳ câu hỏi ngoài lề (không thuộc phạm vi của bài toán hoặc quy hoạch tuyến tính), bạn KHÔNG ĐƯỢC trả lời nội dung đó. Bạn BẮT BUỘC phải trả lời chính xác bằng câu sau và không giải thích gì thêm:\n";
     contextString += "\"Xin lỗi câu hỏi của bạn không thuộc phạm vi của bài toán\"";
 

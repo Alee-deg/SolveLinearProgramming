@@ -115,13 +115,10 @@ void SimplexSolver::addSlackAndSurplusVariables() {
     for (int i = 0; i < m; ++i) {
         bool foundIdentity = false;
 
-        // Nếu người dùng dùng dấu "=" và tự thiết lập ma trận đơn vị cho biến
         if (lp.signs[i] == "=" || lp.signs[i] == "==") {
             for (size_t j = 0; j < lp.c.size(); ++j) {
-                // Kiểm tra hệ số bằng 1 và Cost (Z) phải bằng 0
                 if (std::abs(lp.A[i][j] - 1.0) < CLEAN_EPS && std::abs(lp.c[j]) < CLEAN_EPS) {
                     bool isBasicCol = true;
-                    // Kiểm tra xem các hàng khác có bằng 0 hay không
                     for (int r = 0; r < m; ++r) {
                         if (r != i && std::abs(lp.A[r][j]) > CLEAN_EPS) {
                             isBasicCol = false;
@@ -129,7 +126,6 @@ void SimplexSolver::addSlackAndSurplusVariables() {
                         }
                     }
                     if (isBasicCol) {
-                        // Đảm bảo biến này chưa được cột nào xí chỗ trước
                         bool alreadyUsed = false;
                         for(int r = 0; r < i; ++r) {
                             if (basicVariables[r] == (int)j) alreadyUsed = true;
@@ -144,7 +140,6 @@ void SimplexSolver::addSlackAndSurplusVariables() {
             }
         }
 
-        // Nếu không tìm thấy cột đơn vị, ta mới áp dụng logic mặc định (thêm biến phụ)
         if (!foundIdentity) {
             if (lp.signs[i] == "<=" || lp.signs[i] == "=" || lp.signs[i] == "==") {
                 for (int row = 0; row < m; ++row)
@@ -154,7 +149,7 @@ void SimplexSolver::addSlackAndSurplusVariables() {
                 lp.signs[i] = "=";
             }
         } else {
-            lp.signs[i] = "="; // Chuẩn hóa lại dấu
+            lp.signs[i] = "=";
         }
     }
 }
@@ -186,9 +181,26 @@ bool SimplexSolver::solve() {
         if (!success) return false;
 
         if (checkAlternativeOptima()) {
-            statusMsg = "Vô số nghiệm";
             this->firstSolution = this->getSolution();
             findAndRecordAlternativeOptimum();
+
+            // KIỂM TRA NGHIỆM ẢO ĐỂ QUYẾT ĐỊNH STATUS
+            bool isReallyDifferent = false;
+            for (size_t i = 0; i < firstSolution.size(); ++i) {
+                if (std::abs(firstSolution[i] - altSolution[i]) > CLEAN_EPS) {
+                    isReallyDifferent = true;
+                    break;
+                }
+            }
+
+            if (isReallyDifferent) {
+                statusMsg = "Vô số nghiệm";
+            } else {
+                statusMsg = "Tối ưu";
+                if (!history.empty() && history.back().stepName == "Điểm tối ưu thứ 2") {
+                    history.pop_back();
+                }
+            }
         } else {
             statusMsg = "Tối ưu";
             this->firstSolution = this->getSolution();
@@ -389,9 +401,26 @@ bool SimplexSolver::solveTwoPhase() {
 
     if (success) {
         if (this->checkAlternativeOptima()) {
-            statusMsg = "Vô số nghiệm";
             this->firstSolution = this->getSolution();
             findAndRecordAlternativeOptimum();
+
+            // KIỂM TRA NGHIỆM ẢO ĐỂ QUYẾT ĐỊNH STATUS
+            bool isReallyDifferent = false;
+            for (size_t i = 0; i < firstSolution.size(); ++i) {
+                if (std::abs(firstSolution[i] - altSolution[i]) > CLEAN_EPS) {
+                    isReallyDifferent = true;
+                    break;
+                }
+            }
+
+            if (isReallyDifferent) {
+                statusMsg = "Vô số nghiệm";
+            } else {
+                statusMsg = "Tối ưu";
+                if (!history.empty() && history.back().stepName == "Điểm tối ưu thứ 2") {
+                    history.pop_back();
+                }
+            }
         } else {
             statusMsg = "Tối ưu";
             this->firstSolution = this->getSolution();
@@ -441,39 +470,81 @@ bool SimplexSolver::checkAlternativeOptima() {
 void SimplexSolver::findAndRecordAlternativeOptimum() {
     int m = tableau.size() - 1;
     int n = tableau[0].size() - 1;
-    int altPivotCol = -1;
 
-    for (int j = 0; j < n; ++j) {
-        bool isBasic = false;
-        for (int i = 0; i < m; ++i)
-            if (basicVariables[i] == j) { isBasic = true; break; }
-        if (!isBasic && std::abs(tableau[m][j]) <= CLEAN_EPS) {
-            altPivotCol = j;
-            break;
+    std::set<int> ignoredCols;
+    int internalIdx = 0;
+    for (size_t i = 0; i < lp.varBounds.size(); ++i) {
+        if (lp.varBounds[i].isFree || lp.varBounds[i].sign == "free") {
+            ignoredCols.insert(internalIdx);
+            ignoredCols.insert(internalIdx + 1);
+            internalIdx += 2;
+        } else {
+            internalIdx += 1;
         }
     }
 
-    if (altPivotCol != -1) {
-        int altPivotRow = findPivotRow(altPivotCol);
-        if (altPivotRow != -1) {
-            auto backupTableau = this->tableau;
-            auto backupBasicVars = this->basicVariables;
+    // Sao lưu lại toàn bộ trạng thái để có thể rollback khi tìm thấy nghiệm ảo
+    auto backupTableau = this->tableau;
+    auto backupBasicVars = this->basicVariables;
+    auto backupHistory = this->history;
 
-            if (!history.empty()) {
-                history.back().pivotRow  = altPivotRow;
-                history.back().pivotCol  = altPivotCol;
-            }
-            performPivot(altPivotRow, altPivotCol);
+    bool foundDifferent = false;
 
-            this->altSolution = this->getSolution();
+    // [FIX MỚI] Vòng lặp quét tất cả các cột có khả năng sinh ra vô số nghiệm
+    for (int j = 0; j < n; ++j) {
+        if (ignoredCols.count(j)) continue;
 
-            if (!history.empty())
-                history.back().stepName = "Điểm tối ưu thứ 2";
-
-            this->tableau = backupTableau;
-            this->basicVariables = backupBasicVars;
-        } else {
-            this->altSolution = this->firstSolution;
+        bool isBasic = false;
+        for (int i = 0; i < m; ++i) {
+            if (basicVariables[i] == j) { isBasic = true; break; }
         }
+
+        // Nếu phát hiện biến phi cơ sở có hệ số z = 0
+        if (!isBasic && std::abs(tableau[m][j]) <= CLEAN_EPS) {
+            int altPivotRow = findPivotRow(j);
+            if (altPivotRow != -1) {
+                if (!history.empty()) {
+                    history.back().pivotRow  = altPivotRow;
+                    history.back().pivotCol  = j;
+                }
+
+                // Thực hiện Pivot (Xoay)
+                performPivot(altPivotRow, j);
+                std::vector<double> tempSol = this->getSolution();
+
+                // Kiểm tra xem nghiệm mới có THỰC SỰ KHÁC nghiệm cũ không
+                bool isDifferent = false;
+                for (size_t k = 0; k < firstSolution.size(); ++k) {
+                    if (std::abs(firstSolution[k] - tempSol[k]) > CLEAN_EPS) {
+                        isDifferent = true;
+                        break;
+                    }
+                }
+
+                if (isDifferent) {
+                    // Nếu thực sự khác, lưu nghiệm thứ 2 và dừng tìm kiếm
+                    this->altSolution = tempSol;
+                    if (!history.empty()) {
+                        history.back().stepName = "Điểm tối ưu thứ 2";
+                    }
+                    foundDifferent = true;
+
+                    // Khôi phục lại trạng thái bảng để không ảnh hưởng luồng chính
+                    this->tableau = backupTableau;
+                    this->basicVariables = backupBasicVars;
+                    break;
+                } else {
+                    // Nếu xoay xong mà nghiệm vẫn giữ nguyên (nghiệm ảo), rollback lại và đi thử cột tiếp theo
+                    this->tableau = backupTableau;
+                    this->basicVariables = backupBasicVars;
+                    this->history = backupHistory;
+                }
+            }
+        }
+    }
+
+    // Nếu đã quét sạch mọi cột mà không tìm ra điểm nào khác
+    if (!foundDifferent) {
+        this->altSolution = this->firstSolution;
     }
 }
