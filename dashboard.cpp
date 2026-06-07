@@ -338,9 +338,8 @@ Dashboard::Dashboard(QWidget *parent)
             historyDialog.setWindowTitle("Lịch sử giải bài toán");
             historyDialog.resize(680, 450);
 
-            // ĐỌC SETTINGS TỪ APPDATA
-            QString iniPath = getAppDataPath() + "/settings.ini";
-            QSettings settings(iniPath, QSettings::IniFormat);
+            // [FIX] ĐỌC SETTINGS TỪ THƯ MỤC GỐC ĐỂ ĂN THEO CHUẨN MAINWINDOW (Giống hệt bảng Hướng dẫn sử dụng)
+            QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
             bool isDark = settings.value("dark_mode", false).toBool();
 
             if (isDark) {
@@ -557,7 +556,7 @@ Dashboard::Dashboard(QWidget *parent)
             populateList();
             layout->addWidget(listWidget);
 
-            // GIAO DIỆN NÚT BẤM (Đã thêm nút Xóa Tất Cả)
+            // GIAO DIỆN NÚT BẤM
             QHBoxLayout *btnLayout = new QHBoxLayout();
             btnLayout->setSpacing(8);
             QPushButton *btnClearAll = new QPushButton("🗑 Xóa tất cả", &historyDialog);
@@ -598,7 +597,7 @@ Dashboard::Dashboard(QWidget *parent)
 
             connect(btnCancel, &QPushButton::clicked, &historyDialog, &QDialog::reject);
 
-            // CHỨC NĂNG XÓA TẤT CẢ (MỚI)
+            // CHỨC NĂNG XÓA TẤT CẢ
             connect(btnClearAll, &QPushButton::clicked, [&]() {
                 QMessageBox msgBox(&historyDialog);
                 msgBox.setWindowTitle("Xóa toàn bộ");
@@ -619,11 +618,10 @@ Dashboard::Dashboard(QWidget *parent)
                 }
             });
 
-            // CHỨC NĂNG XÓA MỤC ĐÃ CHỌN (TÍCH CHECKBOX)
+            // CHỨC NĂNG XÓA MỤC ĐÃ CHỌN
             connect(btnDelete, &QPushButton::clicked, [&]() {
                 std::vector<int> toDelete;
 
-                // Lấy tất cả các dòng đã được đánh dấu tick
                 for(int i = 0; i < listWidget->count(); ++i) {
                     QListWidgetItem* item = listWidget->item(i);
                     if (item->data(Qt::UserRole).toInt() != -1 && item->checkState() == Qt::Checked) {
@@ -649,16 +647,15 @@ Dashboard::Dashboard(QWidget *parent)
                 }
 
                 if (msgBox.exec() == QMessageBox::Yes) {
-                    // Cực kỳ quan trọng: Sort giảm dần để xóa từ dưới lên, tránh xô lệch chỉ số index trong g_undoStack
                     std::sort(toDelete.begin(), toDelete.end(), std::greater<int>());
 
                     for (int idx : toDelete) {
                         g_undoStack.erase(g_undoStack.begin() + idx);
                     }
 
-                    saveHistoryToJson(); // Lưu lại vào ổ đĩa
-                    refreshSuggestions(); // Cập nhật lại gợi ý tìm kiếm
-                    populateList();       // Làm mới lại bảng
+                    saveHistoryToJson();
+                    refreshSuggestions();
+                    populateList();
 
                     if (g_undoStack.empty()) {
                         historyDialog.reject();
@@ -689,7 +686,7 @@ Dashboard::Dashboard(QWidget *parent)
                     QMessageBox::warning(
                         &historyDialog,
                         "Thông báo",
-                        "Bạn chỉ được tích chọn 1 bài toán để tải lại dữ liệu."
+                        "Bạn chỉ được tích chọn 1 bài toán để tải lại dữ liệu.\n"
                         "Vui lòng bỏ chọn các bài toán còn lại."
                         );
                     return;
@@ -721,9 +718,6 @@ Dashboard::Dashboard(QWidget *parent)
                 HistoryEntry selectedEntry = g_undoStack[realIndex];
                 LinearProgram lp = selectedEntry.lp;
 
-                // Chỉ đánh dấu bài toán đang được tải lại.
-                // Tuyệt đối không xóa/lưu lịch sử ở bước chọn.
-                // Lịch sử chỉ được cập nhật khi người dùng bấm Solve.
                 g_pendingRestoreIndex = realIndex;
 
                 // --- BẮT ĐẦU QUÁ TRÌNH KHÔI PHỤC LÊN GIAO DIỆN CHÍNH ---
@@ -1007,8 +1001,6 @@ void Dashboard::on_pushButton_3_clicked()
     newEntry.lp = local_lp;
     newEntry.timestamp = QDateTime::currentDateTime();
 
-    // Nếu bài toán hiện tại được tải lại từ lịch sử,
-    // chỉ đến khi bấm Solve mới xóa bản ghi cũ để thay bằng bản ghi mới.
     if (g_pendingRestoreIndex >= 0 && g_pendingRestoreIndex < (int)g_undoStack.size()) {
         g_undoStack.erase(g_undoStack.begin() + g_pendingRestoreIndex);
     }
@@ -1094,6 +1086,8 @@ void Dashboard::getDataFromWd(LinearProgram &lp)
 
 void Dashboard::on_pushButton_5_clicked()
 {
+    g_pendingRestoreIndex = -1;
+
     ui->comboAlgorithm->setCurrentIndex(0);
     ui->max_min->setCurrentIndex(0);
 
@@ -1139,8 +1133,7 @@ void Dashboard::on_btn_HuongDan_clicked()
     dialog.setWindowTitle("Hướng dẫn sử dụng");
     dialog.resize(800, 620);
 
-    QString iniPath = getAppDataPath() + "/settings.ini";
-    QSettings settings(iniPath, QSettings::IniFormat);
+    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
     bool isDark = settings.value("dark_mode", false).toBool();
 
     if (isDark) {
