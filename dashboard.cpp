@@ -338,7 +338,7 @@ Dashboard::Dashboard(QWidget *parent)
             historyDialog.setWindowTitle("Lịch sử giải bài toán");
             historyDialog.resize(680, 450);
 
-            // [FIX] ĐỌC SETTINGS TỪ THƯ MỤC GỐC ĐỂ ĂN THEO CHUẨN MAINWINDOW (Giống hệt bảng Hướng dẫn sử dụng)
+            // [FIX DARK MODE LỊCH SỬ] ĐỌC SETTINGS TỪ THƯ MỤC GỐC ĐỂ ĂN THEO CHUẨN MAINWINDOW
             QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
             bool isDark = settings.value("dark_mode", false).toBool();
 
@@ -416,11 +416,19 @@ Dashboard::Dashboard(QWidget *parent)
                 int vars = lp_item.c.size();
                 int constraints = lp_item.A.size();
 
-                return QString("   ▶ [%1] : [%2] | %3 Biến, %4 Ràng buộc")
+                // [FIX THÊM PHƯƠNG PHÁP GIẢI VÀO MỖI DÒNG]
+                QString algoName = "";
+                if (lp_item.algoType == 0) algoName = "Đơn hình";
+                else if (lp_item.algoType == 1) algoName = "Bland";
+                else if (lp_item.algoType == 2) algoName = "2 Pha";
+                else algoName = "Tự động";
+
+                return QString("   ▶ [%1] : [%2] | %3 Biến, %4 Ràng buộc | %5")
                     .arg(itemTime)
                     .arg(buildObjectiveExpression(lp_item))
                     .arg(vars)
-                    .arg(constraints);
+                    .arg(constraints)
+                    .arg(algoName);
             };
 
             auto buildSearchText = [&](const HistoryEntry& entry) -> QString {
@@ -1173,8 +1181,8 @@ void Dashboard::on_btn_HuongDan_clicked()
     textLabel->setTextFormat(Qt::RichText);
     textLabel->setWordWrap(true);
 
-    textLabel->setStyleSheet(isDark ? "font-size: 15px; line-height: 1.6; color: #CDD6F4;"
-                                    : "font-size: 15px; line-height: 1.6; color: #333333;");
+    textLabel->setStyleSheet(isDark ? "font-size: 18px; line-height: 1.6; color: #CDD6F4;"
+                                    : "font-size: 18px; line-height: 1.6; color: #333333;");
     textLabel->setOpenExternalLinks(true);
 
     QString guideText = R"(
@@ -1236,7 +1244,7 @@ void Dashboard::on_btn_HuongDan_clicked()
 
         <p style="color: #666666; font-style: italic; margin-bottom: 15px;">* Nhấn nút <b>Reset</b> (mũi tên xoay) để dọn dẹp bảng và nhập bài toán mới.</p>
 
-        <p style="font-size: 15px;">
+        <p style="font-size: 18px;">
             🌐 Xem chi tiết file hướng dẫn (PDF):
             <a href="https://github.com/Alee-deg/SolveLinearProgramming/blob/main/HDSD.pdf" style="color: #0078D7; text-decoration: none; font-weight: bold;">Tại đây</a>
         </p>
@@ -1262,7 +1270,7 @@ void Dashboard::on_btn_HuongDan_clicked()
     closeBtn->setCursor(Qt::PointingHandCursor);
     closeBtn->setStyleSheet(isDark ?
                                 "QPushButton { background-color: #89B4FA; color: #1E1E2E; border: none; border-radius: 6px; padding: 9px 35px; font-size: 15px; font-weight: bold; } QPushButton:hover { background-color: #B4BEFE; }" :
-                                "QPushButton { background-color: #0078D7; color: #FFFFFF; border: none; border-radius: 6px; padding: 9px 35px; font-size: 15px; font-weight: bold; } QPushButton:hover { background-color: #005A9E; }"
+                                "QPushButton { background-color: #0078D7; color: #FFFFFF; border: none; border-radius: 6px; padding: 9px 35px; font-weight: bold; } QPushButton:hover { background-color: #005A9E; }"
                             );
     QObject::connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
 
