@@ -229,6 +229,7 @@ jobs:
           libxcb-shape0 libxcb-xfixes0 libxcb-cursor0 \
           libxkbcommon-x11-0 libdbus-1-3 \
           libfontconfig1 libfreetype6 \
+          libssl-dev openssl \
           patchelf file
 
     - name: 4. Build bằng CMake + GCC
@@ -245,8 +246,13 @@ jobs:
         chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
 
         mkdir -p AppDir/usr/bin
+        mkdir -p AppDir/usr/lib
         mkdir -p AppDir/usr/share/applications
         mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+        # [FIX LINUX WAF] Copy OpenSSL vào trong AppImage để không bị lỗi HTTPS
+        cp -L /usr/lib/x86_64-linux-gnu/libssl.so* AppDir/usr/lib/ 2>/dev/null || true
+        cp -L /usr/lib/x86_64-linux-gnu/libcrypto.so* AppDir/usr/lib/ 2>/dev/null || true
 
         cp build/SolveLinearProgramming AppDir/usr/bin/
 
@@ -286,7 +292,7 @@ jobs:
         QT_PLUGIN_SRC="$Qt6_DIR/plugins"
         QT_PLUGIN_DST="AppDir/usr/plugins"
 
-        for dir in styles platformthemes iconengines imageformats; do
+        for dir in styles platformthemes iconengines imageformats tls; do
           mkdir -p "$QT_PLUGIN_DST/$dir"
           cp "$QT_PLUGIN_SRC/$dir/"*.so "$QT_PLUGIN_DST/$dir/" 2>/dev/null || true
         done
