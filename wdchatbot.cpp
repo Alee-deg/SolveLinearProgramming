@@ -25,9 +25,21 @@
 #include <functional>
 
 // =======================================================================
-// Hàm lấy đường dẫn an toàn để lưu cấu hình (Settings & API Key)
+// [FIX LƯU TRỮ] Hàm lấy đường dẫn an toàn CHỈ DÀNH CHO API KEY
 // =======================================================================
-static QString getSettingsPath() {
+static QString getApiKeyPath() {
+    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir dir;
+    if (!dir.exists(dataDir)) {
+        dir.mkpath(dataDir);
+    }
+    return dataDir + "/apikey.ini";
+}
+
+// =======================================================================
+// [FIX LƯU TRỮ] Hàm lấy đường dẫn an toàn CHỈ DÀNH CHO THEME (Sáng/Tối)
+// =======================================================================
+static QString getThemeSettingsPath() {
     QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir dir;
     if (!dir.exists(dataDir)) {
@@ -42,24 +54,48 @@ static QString getSettingsPath() {
 static void verifyAndSaveApiKey(WdChatBot* parentWindow, QTextEdit* chatDisplay, const QString& newKey, std::function<void(bool)> onFinished) {
     QNetworkAccessManager *manager = new QNetworkAccessManager(parentWindow);
     QNetworkRequest request(QUrl("https://api.groq.com/openai/v1/models"));
-    request.setRawHeader("Authorization", "Bearer " + newKey.toUtf8());
+
+    // [FIX LINUX WAF] Thêm các Header tiêu chuẩn để tránh bị Cloudflare/Groq chặn gói tin
+    request.setRawHeader("Authorization", "Bearer " + newKey.trimmed().toUtf8());
+    request.setRawHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+    request.setRawHeader("Accept", "application/json");
 
     QNetworkReply *reply = manager->get(request);
 
     QObject::connect(reply, &QNetworkReply::finished, parentWindow, [=]() {
-        bool isValid = (reply->error() == QNetworkReply::NoError);
-        if (isValid) {
-            QSettings settings(getSettingsPath(), QSettings::IniFormat);
-            settings.setValue("api_key", newKey);
+        // [FIX] Bắt chính xác mã HTTP Code từ máy chủ
+        int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
-            // [FIX] Dùng màu Xanh lá tiêu chuẩn, hiển thị cực rõ trên cả 2 nền Sáng/Tối
-            QString sysColor = "#28A745";
+        if (reply->error() == QNetworkReply::NoError && statusCode == 200) {
+            // Lưu API Key vào thư mục AppData
+            QSettings apiSettings(getApiKeyPath(), QSettings::IniFormat);
+            apiSettings.setValue("api_key", newKey.trimmed());
+
+            // Đọc Theme từ AppData
+            QSettings themeSettings(getThemeSettingsPath(), QSettings::IniFormat);
+            bool isDark = themeSettings.value("dark_mode", false).toBool();
+            QString sysColor = isDark ? "#A6E3A1" : "#28A745";
 
             chatDisplay->append(QString("<div style='color: %1; margin-bottom: 5px;'><b>Hệ thống:</b> API Key đã được cập nhật thành công!</div>").arg(sysColor));
+            if (onFinished) onFinished(true);
         } else {
-            QMessageBox::critical(parentWindow, "Lỗi xác thực", "API Key không hợp lệ, vui lòng kiểm tra lại!");
+            // [FIX LỖI MẠNG LINUX] Hiển thị chi tiết lỗi JSON từ Groq để người dùng biết chính xác lỗi gì
+            QByteArray errorBody = reply->readAll();
+            QString errorDetail = reply->errorString();
+
+            QJsonDocument doc = QJsonDocument::fromJson(errorBody);
+            if (!doc.isNull() && doc.object().contains("error")) {
+                errorDetail = doc.object()["error"].toObject()["message"].toString();
+            } else if (!errorBody.isEmpty()) {
+                errorDetail += " | " + QString::fromUtf8(errorBody).left(150); // Trích xuất một đoạn ngắn nếu không phải JSON
+            }
+
+            QMessageBox::critical(parentWindow, "Lỗi xác thực",
+                                  QString("API Key không hợp lệ hoặc bị chặn kết nối!\n\n- Mã HTTP: %1\n- Chi tiết lỗi: %2")
+                                      .arg(statusCode).arg(errorDetail));
+
+            if (onFinished) onFinished(false);
         }
-        if (onFinished) onFinished(isValid);
         reply->deleteLater();
         manager->deleteLater();
     });
@@ -69,10 +105,27 @@ WdChatBot::WdChatBot(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::WdChatBot)
 {
+
     ui->setupUi(this);
     this->isFirstMessage = true;
 
-    // KHÔNG SỬ DỤNG setStyleSheet CỤC BỘ Ở ĐÂY NỮA ĐỂ KẾ THỪA CSS TỪ MAINWINDOW
+    // ĐỒNG BỘ MÀU THEO THEME TỪ APPDATA
+    QSettings themeSettings(getThemeSettingsPath(), QSettings::IniFormat);
+    bool isDark = themeSettings.value("dark_mode", false).toBool();
+
+    // CSS linh hoạt
+    QString bg = isDark ? "#1E1E2E" : "#F5F7FA";
+    QString panel = isDark ? "#181825" : "#FFFFFF";
+    QString text = isDark ? "#CDD6F4" : "#0A1929";
+    QString border = isDark ? "#45475A" : "#CCCCCC";
+
+    this->setStyleSheet(QString(
+                            "QMainWindow, QDialog, QMessageBox { background-color: %1; }"
+                            "QTextEdit { background-color: %2; color: %3; border: 1px solid %4; border-radius: 8px; padding: 10px; font-family: 'Times New Roman'; font-size: 12pt; }"
+                            "QLineEdit { background-color: %2; color: %3; border: 1px solid %4; border-radius: 6px; padding: 6px 15px; font-family: 'Times New Roman'; font-size: 11pt; }"
+                            "QLabel { color: %3; font-family: 'Times New Roman'; font-size: 11pt; }"
+                            ).arg(bg, panel, text, border));
+
     menuBar()->hide();
 
     connect(ui->inputField, &QLineEdit::returnPressed, this, &WdChatBot::onUserSendMessage);
@@ -93,9 +146,8 @@ void WdChatBot::onUserSendMessage() {
     // XỬ LÝ NHẬP KEY QUA LỆNH ẨN /key
     if (userMessage == "/key") {
         ui->inputField->clear();
-        QString iniPath = getSettingsPath();
-        QSettings settings(iniPath, QSettings::IniFormat);
-        QString currentKey = settings.value("api_key", "").toString();
+        QSettings apiSettings(getApiKeyPath(), QSettings::IniFormat);
+        QString currentKey = apiSettings.value("api_key", "").toString();
 
         bool ok;
         QString newKey = QInputDialog::getText(this, "Cài đặt API Key",
@@ -113,8 +165,10 @@ void WdChatBot::onUserSendMessage() {
         isFirstMessage = false;
     }
 
-    // [FIX] Dùng màu Xanh dương trung tính (hiển thị rõ, không bị tàng hình trên nền Đen lẫn nền Trắng)
-    QString userColor = "#2563EB";
+    // Đọc Theme từ AppData
+    QSettings themeSettings(getThemeSettingsPath(), QSettings::IniFormat);
+    bool isDark = themeSettings.value("dark_mode", false).toBool();
+    QString userColor = isDark ? "#89B4FA" : "#0055ff";
 
     // In tin nhắn của người dùng
     ui->chatDisplay->append(QString("<div style='margin-bottom: 5px; color: %1;'>"
@@ -130,13 +184,16 @@ void WdChatBot::onUserSendMessage() {
 }
 
 void WdChatBot::askGroq(const QString& question) {
-    QString iniPath = getSettingsPath();
-    QSettings settings(iniPath, QSettings::IniFormat);
-    QString apiKey = settings.value("api_key", "").toString().trimmed();
+    QSettings apiSettings(getApiKeyPath(), QSettings::IniFormat);
+    QString apiKey = apiSettings.value("api_key", "").toString().trimmed();
 
-    // [FIX] Dùng màu chung hiển thị tốt trên cả 2 nền
-    QString sysColor = "#E67E22"; // Cam
-    QString errColor = "#D32F2F"; // Đỏ
+    // Đọc Theme từ AppData
+    QSettings themeSettings(getThemeSettingsPath(), QSettings::IniFormat);
+    bool isDark = themeSettings.value("dark_mode", false).toBool();
+
+    QString botColor = isDark ? "#FFFFFF" : "#222222";
+    QString sysColor = isDark ? "#F9E2AF" : "#E67E22";
+    QString errColor = isDark ? "#F38BA8" : "#D32F2F";
 
     // XỬ LÝ TỰ ĐỘNG HỎI NẾU KEY TRỐNG
     if (apiKey.isEmpty()) {
@@ -170,8 +227,11 @@ void WdChatBot::askGroq(const QString& question) {
     QNetworkAccessManager *manager = new QNetworkAccessManager(this);
     QNetworkRequest request(QUrl("https://api.groq.com/openai/v1/chat/completions"));
 
+    // [FIX LINUX WAF] Thêm các Header tiêu chuẩn để tránh bị Cloudflare/Groq chặn gói tin
     request.setRawHeader("Authorization", "Bearer " + apiKey.toUtf8());
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setRawHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+    request.setRawHeader("Accept", "application/json");
 
     QJsonObject message;
     message["role"] = "user";
@@ -199,13 +259,15 @@ void WdChatBot::askGroq(const QString& question) {
 
     QNetworkReply *reply = manager->post(request, QJsonDocument(body).toJson());
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, errColor, manager]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, botColor, errColor, manager]() {
         // Mở khóa thanh nhập liệu
         ui->inputField->setEnabled(true);
         ui->inputField->setPlaceholderText("Nhập câu hỏi của bạn . . .");
         ui->inputField->setFocus();
 
-        if (reply->error() == QNetworkReply::NoError) {
+        int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+
+        if (reply->error() == QNetworkReply::NoError && statusCode == 200) {
             QByteArray response = reply->readAll();
             QJsonDocument jsonDoc = QJsonDocument::fromJson(response);
             QJsonObject root = jsonDoc.object();
@@ -213,26 +275,29 @@ void WdChatBot::askGroq(const QString& question) {
             QString answer = root["choices"].toArray()[0].toObject()["message"].toObject()["content"].toString();
             answer.replace("\n", "<br>");
 
-            // [QUAN TRỌNG NHẤT] CỐ TÌNH XÓA THẺ 'color' CỦA BOT ĐỂ NÓ HOÀN TOÀN TỰ ĐỘNG ĐỔI MÀU THEO THEME
-            // Nếu bạn chọn Theme Sáng -> Nó tự hiển thị chữ Đen
-            // Nếu bạn chọn Theme Tối -> Nó tự hiển thị chữ Trắng ngay lập tức
-            ui->chatDisplay->append(QString("<div style='margin-bottom: 15px;'>"
-                                            "<b>Bot:</b> %1"
-                                            "</div>").arg(answer));
+            // In tin nhắn của Bot
+            ui->chatDisplay->append(QString("<div style='margin-bottom: 15px; color: %1;'>"
+                                            "<b>Bot:</b> %2"
+                                            "</div>").arg(botColor, answer));
         } else {
             QByteArray errorData = reply->readAll();
             QString errorMessage = QString::fromUtf8(errorData);
 
-            if (errorMessage.contains("invalid_api_key", Qt::CaseInsensitive) || errorMessage.contains("Invalid API Key", Qt::CaseInsensitive)) {
+            QJsonDocument doc = QJsonDocument::fromJson(errorData);
+            if (!doc.isNull() && doc.object().contains("error")) {
+                errorMessage = doc.object()["error"].toObject()["message"].toString();
+            }
+
+            if (errorMessage.contains("invalid_api_key", Qt::CaseInsensitive) || errorMessage.contains("Invalid API Key", Qt::CaseInsensitive) || statusCode == 401) {
                 ui->chatDisplay->append(QString("<div style='color: %1; margin-bottom: 15px;'>"
                                                 "<b>Lỗi xác thực:</b> API Key của bạn bị sai, không hợp lệ hoặc đã bị khóa!<br>"
                                                 "<i>&rarr; Vui lòng gõ lệnh <b>/key</b> vào thanh chat để sửa lại Key.</i>"
                                                 "</div>").arg(errColor));
             } else {
                 ui->chatDisplay->append(QString("<div style='color: %1; margin-bottom: 15px;'>"
-                                                "<b>Lỗi mạng:</b> %2<br>"
-                                                "<b>Chi tiết lỗi:</b> %3"
-                                                "</div>").arg(errColor, reply->errorString(), errorMessage));
+                                                "<b>Lỗi mạng (Mã HTTP %2):</b><br>"
+                                                "<b>Chi tiết:</b> %3"
+                                                "</div>").arg(errColor).arg(statusCode).arg(errorMessage.isEmpty() ? reply->errorString() : errorMessage));
             }
         }
 

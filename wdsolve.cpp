@@ -11,6 +11,7 @@
 #include <QBoxLayout>
 #include <QLayoutItem>
 #include <QSizePolicy>
+#include <QStandardPaths> // [FIX LINUX] Thêm thư viện để đọc chuẩn đường dẫn AppData
 
 WdSolve::WdSolve(QWidget *parent)
     : QMainWindow(parent)
@@ -105,8 +106,11 @@ void WdSolve::displayResults(const LinearProgram& lp,
 {
     this->currentAltSolution = altSolution;
 
-    // ĐỌC TRẠNG THÁI GIAO DIỆN SÁNG / TỐI TỪ MAINWINDOW
-    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    // ===============================================================
+    // [FIX LINUX] ĐỌC TRẠNG THÁI GIAO DIỆN SÁNG / TỐI TỪ APPDATA
+    // ===============================================================
+    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QSettings settings(dataDir + "/settings.ini", QSettings::IniFormat);
     bool isDark = settings.value("dark_mode", false).toBool();
 
     // ===============================================================

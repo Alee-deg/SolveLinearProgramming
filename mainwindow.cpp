@@ -9,6 +9,22 @@
 #include <QPushButton>
 #include <QFile>
 
+// THÊM THƯ VIỆN ĐỂ LƯU FILE XUYÊN HỆ ĐIỀU HÀNH
+#include <QStandardPaths>
+#include <QDir>
+
+// =======================================================================
+// [FIX LINUX] HÀM TẠO ĐƯỜNG DẪN AN TOÀN CHO SETTINGS
+// =======================================================================
+static QString getSettingsPath() {
+    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir dir;
+    if (!dir.exists(dataDir)) {
+        dir.mkpath(dataDir);
+    }
+    return dataDir + "/settings.ini";
+}
+
 // =======================================================================
 // HÀM QUẢN LÝ THEME GLOBAL (Ép buộc toàn bộ ứng dụng đổi màu bằng !important)
 // =======================================================================
@@ -108,6 +124,12 @@ void applyGlobalTheme(bool isDark) {
 
     // Ép màu sắc lên toàn bộ ứng dụng (MainWindow, Dashboard, WdSolve, v.v.)
     qApp->setStyleSheet(css);
+    for (QWidget *w : qApp->allWidgets()) {
+        // Chỉ reset những cửa sổ top-level không phải MainWindow
+        if (w->isWindow() && !w->styleSheet().isEmpty()) {
+            w->setStyleSheet("");
+        }
+    }
 }
 
 MainWindow::MainWindow(QWidget *parent)
@@ -133,8 +155,8 @@ MainWindow::MainWindow(QWidget *parent)
     // Đặt vị trí Tuyệt đối (Absolute Positioning): x = 20, y = 20, chiều rộng = 110, chiều cao = 40
     btnThemeToggle->setGeometry(20, 20, 110, 40);
 
-    // Đọc trạng thái khởi đầu
-    QString iniPath = QCoreApplication::applicationDirPath() + "/settings.ini";
+    // [FIX LINUX] Đọc trạng thái khởi đầu từ AppData
+    QString iniPath = getSettingsPath();
     QSettings settings(iniPath, QSettings::IniFormat);
     bool isDarkMode = settings.value("dark_mode", false).toBool();
 
@@ -257,8 +279,8 @@ void MainWindow::on_btnGioiThieu_clicked()
         </div>
     )";
 
-    // Chuyển đổi mã màu HTML cho dễ nhìn trong Dark Mode
-    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    // [FIX LINUX] Chuyển đổi mã màu HTML cho dễ nhìn trong Dark Mode từ đường dẫn chuẩn
+    QSettings settings(getSettingsPath(), QSettings::IniFormat);
     if (settings.value("dark_mode", false).toBool()) {
         htmlContent.replace("#0056B3", "#89B4FA");
         htmlContent.replace("#D9534F", "#F38BA8");
@@ -314,8 +336,8 @@ void MainWindow::on_btnChinhSach_clicked()
         </div>
     )";
 
-    // Chuyển đổi mã màu HTML cho dễ nhìn trong Dark Mode
-    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    // [FIX LINUX] Chuyển đổi mã màu HTML cho dễ nhìn trong Dark Mode từ đường dẫn chuẩn
+    QSettings settings(getSettingsPath(), QSettings::IniFormat);
     if (settings.value("dark_mode", false).toBool()) {
         htmlContent.replace("#0056B3", "#89B4FA");
         htmlContent.replace("#D9534F", "#F38BA8");

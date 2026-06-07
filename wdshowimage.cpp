@@ -3,6 +3,18 @@
 #include "qcustomplot.h"
 #include <QSettings>
 #include <QApplication>
+#include <QStandardPaths> // [FIX LINUX] Thêm thư viện để đọc đường dẫn AppData
+#include <QDir>
+
+// Hàm lấy đường dẫn an toàn cho file Settings (Theme)
+static QString getThemeSettingsPath() {
+    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir dir;
+    if (!dir.exists(dataDir)) {
+        dir.mkpath(dataDir);
+    }
+    return dataDir + "/settings.ini";
+}
 
 WdShowImage::WdShowImage(QWidget *parent)
     : QMainWindow(parent)
@@ -86,10 +98,8 @@ void WdShowImage::drawGraph(const LinearProgram& lp,
     ui->plot->clearItems();
     ui->plot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom);
 
-    // =======================================================================
-    // TỰ ĐỘNG THAY ĐỔI MÀU SẮC ĐỒ THỊ THEO TRẠNG THÁI SÁNG TỐI CỦA HỆ THỐNG
-    // =======================================================================
-    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    // [FIX PATH LINUX] ĐỌC SETTINGS TỪ APPDATA
+    QSettings settings(getThemeSettingsPath(), QSettings::IniFormat);
     bool isDark = settings.value("dark_mode", false).toBool();
 
     if (isDark) {
@@ -221,12 +231,12 @@ void WdShowImage::drawGraph(const LinearProgram& lp,
 
     if (origLp.varBounds.size() >= 1 && !origLp.varBounds[0].isFree) {
         double val = origLp.varBounds[0].value;
-        if (origLp.varBounds[0].sign == ">=")       ineqs.push_back({-1, 0, -val});
+        if (origLp.varBounds[0].sign == ">=")        ineqs.push_back({-1, 0, -val});
         else if (origLp.varBounds[0].sign == "<=")  ineqs.push_back({ 1, 0,  val});
     }
     if (origLp.varBounds.size() >= 2 && !origLp.varBounds[1].isFree) {
         double val = origLp.varBounds[1].value;
-        if (origLp.varBounds[1].sign == ">=")       ineqs.push_back({0, -1, -val});
+        if (origLp.varBounds[1].sign == ">=")        ineqs.push_back({0, -1, -val});
         else if (origLp.varBounds[1].sign == "<=")  ineqs.push_back({0,  1,  val});
     }
 
@@ -353,7 +363,8 @@ void WdShowImage::renderStep(int stepIndex)
 {
     if (stepIndex < 0 || stepIndex >= (int)stepHistory.size()) return;
 
-    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    // [FIX PATH LINUX] Đọc Theme từ AppData
+    QSettings settings(getThemeSettingsPath(), QSettings::IniFormat);
     bool isDark = settings.value("dark_mode", false).toBool();
 
     // 1. Cập nhật đường đi Simplex
@@ -388,22 +399,19 @@ void WdShowImage::renderStep(int stepIndex)
         zLineGraph->setData(zT, zX, zY);
     }
 
-    // -------------------------------------------------------------------
     // 3. CẬP NHẬT NHÃN TRẠNG THÁI [FIX LOGIC THOÁI HÓA]
-    // -------------------------------------------------------------------
     bool isInfiniteProblem = false;
     if (stepHistory.size() >= 2) {
-        int m = stepHistory.back().matrix.size() - 1;
-        int n = stepHistory.back().matrix[0].size() - 1;
+        int m = (int)stepHistory.back().matrix.size() - 1;
+        int n = (int)stepHistory.back().matrix[0].size() - 1;
         double lastZ = stepHistory.back().matrix[m][n];
         double prevZ = stepHistory[stepHistory.size() - 2].matrix[m][n];
 
         QPointF lastPt = getCoordinateFromStep(stepHistory.back());
         QPointF prevPt = getCoordinateFromStep(stepHistory[stepHistory.size() - 2]);
-        // Đo lường xem tọa độ có thực sự di chuyển trên đồ thị hay không
+
         double dist = std::sqrt(std::pow(lastPt.x() - prevPt.x(), 2) + std::pow(lastPt.y() - prevPt.y(), 2));
 
-        // CHỈ XÁC NHẬN VÔ SỐ NGHIỆM KHI: Z không đổi VÀ tọa độ phải thực sự di chuyển đến đỉnh mới (dist > 1e-4)
         if (std::abs(lastZ - prevZ) < 1e-9 &&
             dist > 1e-4 &&
             !stepHistory.back().isInfeasible &&

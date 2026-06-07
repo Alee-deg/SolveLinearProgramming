@@ -338,8 +338,9 @@ Dashboard::Dashboard(QWidget *parent)
             historyDialog.setWindowTitle("Lịch sử giải bài toán");
             historyDialog.resize(680, 450);
 
-            // [FIX DARK MODE LỊCH SỬ] ĐỌC SETTINGS TỪ THƯ MỤC GỐC ĐỂ ĂN THEO CHUẨN MAINWINDOW
-            QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+            // [FIX LINUX] Đọc settings từ AppData để HĐH Linux không bị lỗi Read-only
+            QString iniPath = getAppDataPath() + "/settings.ini";
+            QSettings settings(iniPath, QSettings::IniFormat);
             bool isDark = settings.value("dark_mode", false).toBool();
 
             if (isDark) {
@@ -416,7 +417,6 @@ Dashboard::Dashboard(QWidget *parent)
                 int vars = lp_item.c.size();
                 int constraints = lp_item.A.size();
 
-                // [FIX THÊM PHƯƠNG PHÁP GIẢI VÀO MỖI DÒNG]
                 QString algoName = "";
                 if (lp_item.algoType == 0) algoName = "Đơn hình";
                 else if (lp_item.algoType == 1) algoName = "Bland";
@@ -1141,7 +1141,9 @@ void Dashboard::on_btn_HuongDan_clicked()
     dialog.setWindowTitle("Hướng dẫn sử dụng");
     dialog.resize(800, 620);
 
-    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    // [FIX LINUX] ĐỌC SETTINGS TỪ THƯ MỤC GỐC (GIỮ ĐÚNG THEME MAINWINDOW)
+    QString iniPath = getAppDataPath() + "/settings.ini";
+    QSettings settings(iniPath, QSettings::IniFormat);
     bool isDark = settings.value("dark_mode", false).toBool();
 
     if (isDark) {
@@ -1270,7 +1272,7 @@ void Dashboard::on_btn_HuongDan_clicked()
     closeBtn->setCursor(Qt::PointingHandCursor);
     closeBtn->setStyleSheet(isDark ?
                                 "QPushButton { background-color: #89B4FA; color: #1E1E2E; border: none; border-radius: 6px; padding: 9px 35px; font-size: 15px; font-weight: bold; } QPushButton:hover { background-color: #B4BEFE; }" :
-                                "QPushButton { background-color: #0078D7; color: #FFFFFF; border: none; border-radius: 6px; padding: 9px 35px; font-weight: bold; } QPushButton:hover { background-color: #005A9E; }"
+                                "QPushButton { background-color: #0078D7; color: #FFFFFF; border: none; border-radius: 6px; padding: 9px 35px; font-size: 15px; font-weight: bold; } QPushButton:hover { background-color: #005A9E; }"
                             );
     QObject::connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
 
