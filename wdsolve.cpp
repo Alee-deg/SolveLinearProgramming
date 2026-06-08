@@ -18,7 +18,31 @@
 #include <QPageSize>
 #include <QTextBrowser>
 #include <QRegularExpression>
+#include <QFile>
+#include <QProcess>
+#include <QTemporaryDir>
+#include <QFileInfo>
 #include <cmath>
+
+
+// =======================================================================
+// [FIX THEME ĐỒNG BỘ] Đọc trạng thái Dark Mode từ AppData trước,
+// sau đó mới fallback về applicationDirPath. Cách này giúp bản Linux/AppImage
+// không bị lệch theme giữa MainWindow, màn hình kết quả và cửa sổ xem PDF.
+// =======================================================================
+static bool readDarkModeSetting()
+{
+    QString appDataSettingsPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/settings.ini";
+    if (QFile::exists(appDataSettingsPath)) {
+        QSettings appDataSettings(appDataSettingsPath, QSettings::IniFormat);
+        if (appDataSettings.contains("dark_mode")) {
+            return appDataSettings.value("dark_mode", false).toBool();
+        }
+    }
+
+    QSettings appDirSettings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    return appDirSettings.value("dark_mode", false).toBool();
+}
 
 WdSolve::WdSolve(QWidget *parent)
     : QMainWindow(parent)
@@ -90,18 +114,15 @@ WdSolve::WdSolve(QWidget *parent)
     }
 
     // =======================================================================
-    // HÀM FORMAT SỐ CHUNG: Làm tròn 2 chữ số thập phân, nếu là số nguyên thì bỏ .00
+    // HÀM FORMAT SỐ CHUNG: Luôn luôn lấy 2 chữ số thập phân (kể cả số nguyên ra .00)
     // =======================================================================
     auto formatVal = [](double val) -> QString {
-        if (std::abs(val) < 1e-9) return "0";
-        if (std::abs(val - std::round(val)) < 1e-9) return QString::number(std::round(val));
+        if (std::abs(val) < 1e-9) return "0.00";
         return QString::number(val, 'f', 2);
     };
 
     auto formatCoeff = [](double val) -> QString {
-        double v = std::abs(val);
-        if (std::abs(v - std::round(v)) < 1e-9) return QString::number(std::round(v));
-        return QString::number(v, 'f', 2);
+        return QString::number(std::abs(val), 'f', 2);
     };
 
     // =======================================================================
@@ -154,8 +175,16 @@ WdSolve::WdSolve(QWidget *parent)
         auto getVarNameHtml = [&](int idx) -> QString {
             if (idx < 0 || idx >= (int)varNames.size()) return "";
             QString v = varNames[idx];
-            v.replace("_{", "<sub>").replace("}", "</sub>").replace("^+", "<sup>+</sup>").replace("^-", "<sup>-</sup>");
-            return v;
+
+            // [FIX PDF NO-WRAP] x_0 từng bị tách thành "x_" và "0" xuống dòng.
+            // Chuyển riêng x_0 sang HTML subscript trước khi bọc nobr.
+            if (v == "x_0" || v == "x0") {
+                v = "x<sub>0</sub>";
+            } else {
+                v.replace("_{", "<sub>").replace("}", "</sub>").replace("^+", "<sup>+</sup>").replace("^-", "<sup>-</sup>");
+            }
+
+            return "<nobr>" + v + "</nobr>";
         };
 
         const SimplexStep& lastStep = currentHistory.back();
@@ -198,16 +227,17 @@ WdSolve::WdSolve(QWidget *parent)
         optSolHtml += ")"; optSolTex += ")";
         varListHtml += ")"; varListTex += ")";
 
-        struct TermInfo { bool isPos; double coeff; QString varHtml; QString varTex; };
-
         // ==========================================
         // 1. TẠO CHUỖI HTML ĐỂ RENDER PDF BÁO CÁO
         // ==========================================
         QString html = "<html><head><style>"
-                       "body { font-family: 'Times New Roman', serif; font-size: 14pt; color: black; background: white; line-height: 1.5; padding: 20px; }"
-                       "h2 { text-align: center; color: #000000; text-transform: uppercase; margin-bottom: 30px; }"
-                       "h3 { text-align: left; color: #000000; margin-top: 30px; margin-bottom: 10px; }"
-                       "td { padding: 4px 2px; }" // Giảm padding để bảng gọn gàng hơn
+                       "body { font-family: 'Times New Roman', serif; font-size: 12pt; color: #000000; background: #ffffff; line-height: 1.35; margin: 0; padding: 0; text-align: justify; }"
+                       "h2 { text-align: center; color: #000000; text-transform: uppercase; font-size: 16pt; font-weight: bold; margin: 0 0 18px 0; line-height: 1.25; }"
+                       "h3 { text-align: left; color: #000000; font-size: 13.5pt; font-weight: bold; margin: 18px 0 8px 0; line-height: 1.25; page-break-after: avoid; }"
+                       "p { font-size: 12pt; line-height: 1.35; margin: 6px 0; text-align: justify; }"
+                       "table { page-break-inside: avoid; }"
+                       "td { padding: 2px 1px; vertical-align: middle; }"
+                       ".math-block { text-align: center; width: 100%; margin: 6px 0 12px 0; font-size: 12pt; }"
                        "</style></head><body>";
 
         html += "<h2>GIẢI BÀI TOÁN QUY HOẠCH TUYẾN TÍNH</h2>";
@@ -227,12 +257,12 @@ WdSolve::WdSolve(QWidget *parent)
                 isFirstObj = false;
             }
         }
-        if (isFirstObj) html += "0";
+        if (isFirstObj) html += "0.00";
         html += "</div>";
 
         html += "<p style='text-align: left; margin-bottom: 5px;'><b>Hệ ràng buộc:</b></p>";
         html += "<div style='text-align: center; width: 100%; margin-bottom: 15px;'>";
-        html += "<table cellspacing='0' cellpadding='0' style='margin: 0 auto; border: none; font-size: 15pt;'>";
+        html += "<table cellspacing='0' cellpadding='0' style='margin: 0 auto; border: none; font-size: 12pt;'>";
 
         for (size_t i = 0; i < currentOriginalLp.A.size(); ++i) {
             html += "<tr>";
@@ -240,47 +270,47 @@ WdSolve::WdSolve(QWidget *parent)
             for (size_t j = 0; j < currentOriginalLp.A[i].size(); ++j) {
                 double val = currentOriginalLp.A[i][j];
                 if (std::abs(val) < 1e-9) {
-                    html += "<td width='20'></td><td width='40'></td><td width='25'></td>";
+                    html += "<td width='12'></td><td width='36'></td><td width='24'></td>";
                 } else {
                     QString sign = (val > 0) ? (isFirstTerm ? "" : "+") : "-";
                     bool isOne = (std::abs(std::abs(val) - 1.0) < 1e-9);
                     QString coeffStr = isOne ? "" : formatCoeff(val);
-                    html += "<td width='20' align='center'>" + sign + "</td>";
-                    html += "<td width='40' align='right'>" + coeffStr + "</td>";
-                    html += "<td width='25' align='left'>x<sub>" + QString::number(j + 1) + "</sub></td>";
+                    html += "<td nowrap='nowrap' width='12' align='center' valign='middle' style='text-align: center; padding-left: 0; padding-right: 0; white-space: nowrap;'><div align='center' style='width:12px; text-align:center; margin-left:auto; margin-right:auto;'>" + sign + "</div></td>";
+                    html += "<td nowrap='nowrap' width='36' align='right' style='white-space: nowrap; padding-left: 0; padding-right: 1px;'><nobr>" + coeffStr + "</nobr></td>";
+                    html += "<td nowrap='nowrap' width='24' align='left' style='white-space: nowrap; padding-left: 1px; padding-right: 0;'><nobr>x<sub>" + QString::number(j + 1) + "</sub></nobr></td>";
                     isFirstTerm = false;
                 }
             }
-            if (isFirstTerm) html += "<td width='20'></td><td width='40' align='right'>0</td><td width='25'></td>";
+            if (isFirstTerm) html += "<td width='12'></td><td nowrap='nowrap' width='36' align='right' style='white-space: nowrap; padding-left: 0; padding-right: 1px;'><nobr>0.00</nobr></td><td width='24'></td>";
 
             QString signHtml = currentOriginalLp.signs[i];
             if (signHtml == "<=") signHtml = "&le;"; else if (signHtml == ">=") signHtml = "&ge;";
-            html += "<td width='35' align='center'>" + signHtml + "</td>";
-            html += "<td width='45' align='left'>" + formatVal(currentOriginalLp.b[i]) + "</td></tr>";
+            html += "<td nowrap='nowrap' width='22' align='center' style='white-space: nowrap; text-align: center; padding-left: 0; padding-right: 0;'><nobr>" + signHtml + "</nobr></td>";
+            html += "<td nowrap='nowrap' width='60' align='left' style='white-space: nowrap; padding-left: 2px; padding-right: 0;'><nobr>" + formatVal(currentOriginalLp.b[i]) + "</nobr></td></tr>";
         }
 
         for (size_t i = 0; i < currentOriginalLp.varBounds.size(); ++i) {
             html += "<tr>";
             for (size_t j = 0; j < currentOriginalLp.A[0].size(); ++j) {
                 if (i == j) {
-                    html += "<td width='20'></td><td width='40'></td><td width='25' align='left'>x<sub>" + QString::number(j + 1) + "</sub></td>";
+                    html += "<td width='12'></td><td width='36'></td><td nowrap='nowrap' width='24' align='left' style='white-space: nowrap; padding-left: 1px; padding-right: 0;'><nobr>x<sub>" + QString::number(j + 1) + "</sub></nobr></td>";
                 } else {
-                    html += "<td width='20'></td><td width='40'></td><td width='25'></td>";
+                    html += "<td width='12'></td><td width='36'></td><td width='24'></td>";
                 }
             }
 
             if (currentOriginalLp.varBounds[i].isFree || currentOriginalLp.varBounds[i].sign == "free") {
-                html += "<td colspan='2' align='left' style='padding-left: 10px;'>&isin; &real;</td></tr>";
+                html += "<td nowrap='nowrap' colspan='2' align='left' style='white-space: nowrap; padding-left: 2px;'><nobr>&isin; &real;</nobr></td></tr>";
             } else {
                 QString s = currentOriginalLp.varBounds[i].sign;
                 if (s == "<=") s = "&le;"; else if (s == ">=") s = "&ge;";
-                html += "<td width='35' align='center'>" + s + "</td>";
-                html += "<td width='45' align='left'>" + formatVal(currentOriginalLp.varBounds[i].value) + "</td></tr>";
+                html += "<td nowrap='nowrap' width='22' align='center' style='white-space: nowrap; text-align: center; padding-left: 0; padding-right: 0;'><nobr>" + s + "</nobr></td>";
+                html += "<td nowrap='nowrap' width='60' align='left' style='white-space: nowrap; padding-left: 2px; padding-right: 0;'><nobr>" + formatVal(currentOriginalLp.varBounds[i].value) + "</nobr></td></tr>";
             }
         }
         html += "</table></div>";
 
-        // --- CÁC BƯỚC GIẢI DẠNG TỪ VỰNG HTML ---
+        // --- CÁC BƯỚC GIẢI DẠNG TỪ VỰNG HTML TRONG PDF ---
         html += "<h3>2. CÁC BƯỚC GIẢI (DẠNG TỪ VỰNG)</h3>";
         for (size_t stepIdx = 0; stepIdx < currentHistory.size(); ++stepIdx) {
             const SimplexStep& step = currentHistory[stepIdx];
@@ -290,9 +320,110 @@ WdSolve::WdSolve(QWidget *parent)
 
             html += "<p style='text-align: left; margin-top: 25px;'><b>" + step.stepName + "</b></p>";
 
-            // [FIX MỚI] Dùng Table cứng cột để đảm bảo căn dọc hoàn hảo
+            // ===================================================================
+            // [FIX PDF] Thêm các dòng giải thích giống phần hiển thị dạng từ vựng
+            // trong tab "Các bước thực thi". Chỉ áp dụng cho báo cáo PDF.
+            // ===================================================================
+            QString pdfIntroHtml = "";
+            QString zTextForStep = ui->lineEdit_Z->text();
+            bool isLastStepPdf = (stepIdx == currentHistory.size() - 1);
+
+            QString pdfOptZHtml;
+            if (currentOriginalLp.isMaximize) {
+                pdfOptZHtml = "Đối với hàm mục tiêu, vì bài toán gốc là <b>Max Z</b> nên thuật toán đã giải thông qua việc tìm <b>Min(-Z)</b>. Do đó, giá trị lớn nhất của Z sẽ bằng đảo dấu của hằng số tự do trong phương trình -Z hiện tại.";
+            } else {
+                pdfOptZHtml = "Đối với hàm mục tiêu, giá trị nhỏ nhất của <b>Min Z</b> chính là hằng số tự do trong phương trình Z hiện tại.";
+            }
+
+            QString pdfUnboundedHtml;
+            if (currentOriginalLp.isMaximize) {
+                pdfUnboundedHtml = "<b>* Giải thích không giới nội:</b> các hệ số đứng trước biến ứng với hệ số âm nhất ở hàm mục tiêu trong các phương trình ở hệ ràng buộc đều dương.<br>"
+                                   "<b>* Giải thích:</b> Hàm mục tiêu có thể tăng lên vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Max Z là <b>+&infin;</b>.";
+            } else {
+                pdfUnboundedHtml = "<b>* Giải thích không giới nội:</b> các hệ số đứng trước biến ứng với hệ số âm nhất ở hàm mục tiêu trong các phương trình ở hệ ràng buộc đều dương.<br>"
+                                   "<b>* Giải thích:</b> Hàm mục tiêu có thể giảm xuống vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Min Z là <b>-&infin;</b>.";
+            }
+
+            if (step.pivotCol >= 0 && step.pivotRow >= 0) {
+                QString enterVar = getVarNameHtml(step.pivotCol);
+                QString leaveVar = "?";
+                if (step.currentBasicVars[step.pivotRow] >= 0 &&
+                    step.currentBasicVars[step.pivotRow] < (int)varNames.size()) {
+                    leaveVar = getVarNameHtml(step.currentBasicVars[step.pivotRow]);
+                }
+
+                if (stepIdx == 0 && isPhase1Loc) {
+                    pdfIntroHtml += "<p style='text-align: left; margin: 4px 0 10px 0; font-style: italic; font-size: 12pt;'>"
+                                    "&rarr; <b>Phép xoay đặc biệt:</b> Đưa biến phụ <b><font color='green'>" + enterVar + "</font></b> "
+                                                 "vào cơ sở để thay thế <b><font color='red'>" + leaveVar + "</font></b> nhằm làm vế phải dương."
+                                                 "</p>";
+                } else {
+                    pdfIntroHtml += "<p style='text-align: left; margin: 4px 0 10px 0; font-style: italic; font-size: 12pt;'>"
+                                    "&rarr; Chọn <b><font color='green'>" + enterVar + "</font></b> làm biến vào, đẩy "
+                                                 "<b><font color='red'>" + leaveVar + "</font></b> ra khỏi cơ sở."
+                                                 "</p>";
+
+                    if (zTextForStep.contains("Vô số nghiệm", Qt::CaseInsensitive) && stepIdx + 2 == currentHistory.size()) {
+                        pdfIntroHtml += "<p style='text-align: left; margin: 0 0 8px 0; color: #d9534f; font-size: 12pt;'>"
+                                        "&rarr; <b>Kết luận:</b> Đã đạt từ vựng tối ưu và bài toán có vô số nghiệm."
+                                        "</p>";
+                        pdfIntroHtml += "<p style='text-align: left; margin: 0 0 12px 0; color: #0056b3; font-style: italic; font-size: 11pt;'>"
+                                        "<b>* Giải thích vô số nghiệm:</b> vì tồn tại hệ số của biến không cơ sở ở hàm mục tiêu bằng 0 nên bài toán có vô số nghiệm tối ưu.<br>"
+                                        "<b>* Giải thích cách đọc nghiệm:</b> cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.<br>"
+                                        "<b>* Giải thích giá trị tối ưu:</b> " + pdfOptZHtml + "<br>"
+                                                        "<b>* Lưu ý:</b> Bước xoay tiếp theo chỉ để tìm tọa độ tối ưu thứ 2."
+                                                        "</p>";
+                    }
+                }
+            } else {
+                if (!isLastStepPdf) {
+                    if (isPhase1Loc) {
+                        pdfIntroHtml += "<p style='text-align: left; margin: 4px 0 8px 0; color: #d9534f; font-size: 12pt;'>"
+                                        "&rarr; <b>Kết luận:</b> Đã đạt từ vựng tối ưu của Pha 1."
+                                        "</p>";
+                    } else {
+                        pdfIntroHtml += "<p style='text-align: left; margin: 4px 0 10px 0; font-style: italic; font-size: 12pt;'>"
+                                        "&rarr; Hệ phương trình đã sẵn sàng. Tiếp tục thuật toán Đơn hình."
+                                        "</p>";
+                    }
+                } else {
+                    if (zTextForStep.contains("Không giới nội", Qt::CaseInsensitive)) {
+                        pdfIntroHtml += "<p style='text-align: left; margin: 4px 0 8px 0; color: #d9534f; font-size: 12pt;'>"
+                                        "&rarr; <b>Kết luận:</b> Bài toán không giới nội. Dừng thuật toán."
+                                        "</p>";
+                        pdfIntroHtml += "<p style='text-align: left; margin: 0 0 12px 0; color: #0056b3; font-style: italic; font-size: 11pt;'>"
+                                        + pdfUnboundedHtml +
+                                        "</p>";
+                    } else if (zTextForStep.contains("Vô nghiệm", Qt::CaseInsensitive)) {
+                        pdfIntroHtml += "<p style='text-align: left; margin: 4px 0 8px 0; color: #d9534f; font-size: 12pt;'>"
+                                        "&rarr; <b>Kết luận:</b> Bài toán vô nghiệm. Dừng thuật toán."
+                                        "</p>";
+                        pdfIntroHtml += "<p style='text-align: left; margin: 0 0 12px 0; color: #0056b3; font-style: italic; font-size: 11pt;'>"
+                                        "<b>* Giải thích:</b> Hệ ràng buộc mâu thuẫn nhau nên không tồn tại phương án thỏa mãn tất cả các ràng buộc."
+                                        "</p>";
+                    } else if (zTextForStep.contains("Vô số nghiệm", Qt::CaseInsensitive)) {
+                        pdfIntroHtml += "<p style='text-align: left; margin: 4px 0 8px 0; color: #d9534f; font-size: 12pt;'>"
+                                        "&rarr; <b>Kết luận:</b> Đã tìm được tọa độ tối ưu thứ 2. Dừng thuật toán."
+                                        "</p>";
+                        pdfIntroHtml += "<p style='text-align: left; margin: 0 0 12px 0; color: #0056b3; font-style: italic; font-size: 11pt;'>"
+                                        "<b>* Giải thích cách lấy nghiệm tối ưu:</b> cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.<br>"
+                                        "<b>* Giải thích giá trị tối ưu:</b> " + pdfOptZHtml +
+                                        "</p>";
+                    } else {
+                        pdfIntroHtml += "<p style='text-align: left; margin: 4px 0 8px 0; color: #d9534f; font-size: 12pt;'>"
+                                        "&rarr; <b>Kết luận:</b> Đã đạt từ vựng tối ưu. Dừng thuật toán."
+                                        "</p>";
+                        pdfIntroHtml += "<p style='text-align: left; margin: 0 0 12px 0; color: #0056b3; font-style: italic; font-size: 11pt;'>"
+                                        "<b>* Giải thích cách đọc nghiệm:</b> cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.<br>"
+                                        "<b>* Giải thích giá trị tối ưu:</b> " + pdfOptZHtml +
+                                        "</p>";
+                    }
+                }
+            }
+
+            html += pdfIntroHtml;
             html += "<div style='text-align: center; width: 100%;'>";
-            html += "<table cellspacing='0' cellpadding='0' style='margin: 0 auto; border: none; font-size: 15pt;'>";
+            html += "<table cellspacing='0' cellpadding='0' style='margin: 0 auto; border: none; font-size: 12pt;'>";
 
             std::vector<int> rowOrder;
             rowOrder.push_back(m);
@@ -316,8 +447,13 @@ WdSolve::WdSolve(QWidget *parent)
                 html += "<tr>";
 
                 QString lhsVar = isZRow ? (isPhase1Loc ? "&xi;" : (currentOriginalLp.isMaximize ? "-Z" : "Z")) : getVarNameHtml(step.currentBasicVars[i]);
-                html += "<td width='40' align='right' style='border: none;'><b>" + lhsVar + "</b></td>";
-                html += "<td width='25' align='center' style='border: none;'> = </td>";
+                // TÔ MÀU ĐỎ BIẾN RA Ở BẢNG PDF (Theo yêu cầu)
+                if (!isZRow && i == step.pivotRow) {
+                    lhsVar = QString("<font color='red'>%1</font>").arg(lhsVar);
+                }
+
+                html += "<td nowrap='nowrap' width='40' align='right' style='border: none; white-space: nowrap;'><b>" + lhsVar + "</b></td>";
+                html += "<td nowrap='nowrap' width='18' align='center' style='border: none; white-space: nowrap;'> = </td>";
 
                 double rhsVal = isZRow ? -step.matrix[m][n] : step.matrix[i][n];
                 if (std::abs(rhsVal) < 1e-9) rhsVal = 0.0;
@@ -331,7 +467,8 @@ WdSolve::WdSolve(QWidget *parent)
 
                 bool hasConst = std::abs(rhsVal) >= 1e-9 || !hasVarTerms;
                 QString constStr = hasConst ? formatVal(rhsVal) : "";
-                html += "<td width='55' align='right' style='border: none;'>" + constStr + "</td>";
+
+                html += "<td nowrap='nowrap' width='60' align='right' style='border: none; white-space: nowrap; padding-right: 2px;'><nobr>" + constStr + "</nobr></td>";
 
                 bool isFirstRhsTerm = !hasConst;
 
@@ -340,7 +477,7 @@ WdSolve::WdSolve(QWidget *parent)
                     if (isZRow && stepIdx == 0 && isPhase1Loc && (varNames[j] == "x_0" || varNames[j] == "x0")) coeff = 1.0;
 
                     if (std::abs(coeff) < 1e-9) {
-                        html += "<td width='20' style='border:none;'></td><td width='45' style='border:none;'></td><td width='30' style='border:none;'></td>";
+                        html += "<td width='14' style='border:none;'></td><td width='46' style='border:none;'></td><td width='28' style='border:none;'></td>";
                     } else {
                         QString sign = "";
                         if (coeff > 0) sign = isFirstRhsTerm ? "" : "+";
@@ -350,10 +487,14 @@ WdSolve::WdSolve(QWidget *parent)
                         bool isOne = (std::abs(std::abs(coeff) - 1.0) < 1e-9);
                         QString coeffStr = isOne ? "" : formatCoeff(coeff);
                         QString varName = getVarNameHtml(j);
+                        // TÔ MÀU XANH BIẾN VÀO Ở BẢNG PDF (Theo yêu cầu)
+                        if (j == step.pivotCol) {
+                            varName = QString("<b><font color='green'>%1</font></b>").arg(varName);
+                        }
 
-                        html += "<td width='20' align='center' style='border: none;'>" + sign + "</td>";
-                        html += "<td width='45' align='right' style='border: none;'>" + coeffStr + "</td>";
-                        html += "<td width='30' align='left' style='border: none; padding-left: 2px;'>" + varName + "</td>";
+                        html += "<td nowrap='nowrap' width='14' align='center' valign='middle' style='border: none; white-space: nowrap; text-align: center; padding-left: 0; padding-right: 0;'><div align='center' style='width:14px; text-align:center; margin-left:auto; margin-right:auto;'><nobr>" + sign + "</nobr></div></td>";
+                        html += "<td nowrap='nowrap' width='46' align='right' style='border: none; white-space: nowrap; padding-right: 2px;'><nobr>" + coeffStr + "</nobr></td>";
+                        html += "<td nowrap='nowrap' width='28' align='left' style='border: none; white-space: nowrap; padding-left: 1px;'>" + varName + "</td>";
                     }
                 }
                 html += "</tr>";
@@ -363,9 +504,9 @@ WdSolve::WdSolve(QWidget *parent)
             if (globalIsPhase1 && (int)stepIdx == lastPhase1StepIdx) {
                 double xi_val = -step.matrix[m][n];
                 if (std::abs(xi_val) < 1e-9) {
-                    html += "<p style='text-align: left; font-style: italic; color: #0056b3; font-size: 13pt;'>* <b>Giải thích:</b> Để suy ra nghiệm, ta cho tất cả các biến không cơ sở (các biến nằm ở vế phải) bằng 0, khi đó các biến cơ sở (vế trái) sẽ nhận giá trị bằng đúng hằng số tự do của phương trình tương ứng. Vì giá trị tối ưu &xi; = 0, bài toán gốc có nghiệm khả thi. Thuật toán sẽ tiếp tục <b>chuyển sang Pha 2</b>.</p>";
+                    html += "<p style='text-align: left; font-style: italic; color: #0056b3; font-size: 12pt;'>* <b>Giải thích:</b> Để suy ra nghiệm, ta cho tất cả các biến không cơ sở (các biến nằm ở vế phải) bằng 0, khi đó các biến cơ sở (vế trái) sẽ nhận giá trị bằng đúng hằng số tự do của phương trình tương ứng. Vì giá trị tối ưu &xi; = 0, bài toán gốc có nghiệm khả thi. Thuật toán sẽ tiếp tục <b>chuyển sang Pha 2</b>.</p>";
                 } else {
-                    html += "<p style='text-align: left; font-style: italic; color: #d9534f; font-size: 13pt;'>* <b>Giải thích:</b> Để suy ra nghiệm, ta cho tất cả các biến không cơ sở (các biến nằm ở vế phải) bằng 0, khi đó các biến cơ sở (vế trái) sẽ nhận giá trị bằng đúng hằng số tự do của phương trình tương ứng. Vì giá trị tối ưu &xi; &ne; 0, hệ ràng buộc của bài toán gốc mâu thuẫn nhau nên <b>bài toán vô nghiệm</b>.</p>";
+                    html += "<p style='text-align: left; font-style: italic; color: #d9534f; font-size: 12pt;'>* <b>Giải thích:</b> Để suy ra nghiệm, ta cho tất cả các biến không cơ sở (các biến nằm ở vế phải) bằng 0, khi đó các biến cơ sở (vế trái) sẽ nhận giá trị bằng đúng hằng số tự do của phương trình tương ứng. Vì giá trị tối ưu &xi; &ne; 0, hệ ràng buộc của bài toán gốc mâu thuẫn nhau nên <b>bài toán vô nghiệm</b>.</p>";
                 }
             }
         }
@@ -393,11 +534,26 @@ WdSolve::WdSolve(QWidget *parent)
         // ==========================================
         // 2. TẠO CHUỖI LATEX CODE ĐỂ XUẤT FILE .TEX
         // ==========================================
+        auto getVarNameTex = [&](int idx) -> QString {
+            if (idx < 0 || idx >= (int)varNames.size()) return "?";
+            QString v = varNames[idx];
+            if (v == "x_0" || v == "x0") return "x_{0}";
+            return v;
+        };
+
+        auto colorTexVar = [&](const QString& var, const QString& color) -> QString {
+            if (var == "?") return var;
+            return "\\textcolor{" + color + "}{" + var + "}";
+        };
+
         QString tex = "\\documentclass[12pt,a4paper]{article}\n";
-        tex += "\\usepackage[utf8]{inputenc}\n";
-        tex += "\\usepackage[T5]{fontenc}\n";
-        tex += "\\usepackage{amsmath, geometry, array, amssymb}\n";
+        tex += "\\usepackage{fontspec}\n";
+        tex += "\\usepackage[vietnamese]{babel}\n";
+        tex += "\\usepackage{amsmath, geometry, array, amssymb, xcolor}\n";
+        tex += "\\setmainfont{TeX Gyre Termes}\n";
         tex += "\\geometry{margin=1in}\n";
+        tex += "\\sloppy\n";
+        tex += "\\emergencystretch=2em\n";
         tex += "\\begin{document}\n\n";
         tex += "\\begin{center}\n\\Large\\textbf{GIẢI BÀI TOÁN QUY HOẠCH TUYẾN TÍNH}\n\\end{center}\n\\vspace{0.5cm}\n\n";
 
@@ -416,7 +572,7 @@ WdSolve::WdSolve(QWidget *parent)
                 isFirstTexObj = false;
             }
         }
-        if (isFirstTexObj) tex += "0";
+        if (isFirstTexObj) tex += "0.00";
         tex += " $\n\\end{center}\n\n";
 
         tex += "\\noindent\\textbf{Hệ ràng buộc (Bao gồm ràng buộc dấu):}\n";
@@ -441,7 +597,7 @@ WdSolve::WdSolve(QWidget *parent)
                     isFirstTerm = false;
                 }
             }
-            if (isFirstTerm) tex += " & 0 & & ";
+            if (isFirstTerm) tex += " & 0.00 & & ";
 
             QString s = currentOriginalLp.signs[i];
             if (s == "<=") s = "\\le";
@@ -466,7 +622,6 @@ WdSolve::WdSolve(QWidget *parent)
         }
         tex += "\\end{array} \\]\n\\end{center}\n\n";
 
-        // --- CÁC BƯỚC GIẢI DẠNG TỪ VỰNG LATEX ---
         tex += "\\section*{2. Các bước giải (Dạng từ vựng)}\n";
         for (size_t stepIdx = 0; stepIdx < currentHistory.size(); ++stepIdx) {
             const SimplexStep& step = currentHistory[stepIdx];
@@ -483,12 +638,76 @@ WdSolve::WdSolve(QWidget *parent)
             }
 
             tex += "\\vspace{0.3cm}\n\\noindent \\textbf{" + step.stepName + "}\n\n";
-            // Lưới cột LaTeX: Right (LHS) | Center (=) | Right (Const) | [Center (Sign) | Right (Coeff) | Left (Var)]...
+
+            QString texOptZ;
+            if (currentOriginalLp.isMaximize) {
+                texOptZ = "Đối với hàm mục tiêu, vì bài toán gốc là \\textbf{Max Z} nên thuật toán đã giải thông qua việc tìm \\textbf{Min($-Z$)}. Do đó, giá trị lớn nhất của $Z$ sẽ bằng đảo dấu của hằng số tự do trong phương trình $-Z$ hiện tại.";
+            } else {
+                texOptZ = "Đối với hàm mục tiêu, giá trị nhỏ nhất của \\textbf{Min Z} chính là hằng số tự do trong phương trình $Z$ hiện tại.";
+            }
+
+            QString texUnbounded;
+            if (currentOriginalLp.isMaximize) {
+                texUnbounded = "\\noindent\\textit{\\textbf{* Giải thích không giới nội:} các hệ số đứng trước biến ứng với hệ số âm nhất ở hàm mục tiêu trong các phương trình ở hệ ràng buộc đều dương.}\\\\\n"
+                               "\\noindent\\textit{\\textbf{* Giải thích:} Hàm mục tiêu có thể tăng lên vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Max Z là $+\\infty$.}\\n\n";
+            } else {
+                texUnbounded = "\\noindent\\textit{\\textbf{* Giải thích không giới nội:} các hệ số đứng trước biến ứng với hệ số âm nhất ở hàm mục tiêu trong các phương trình ở hệ ràng buộc đều dương.}\\\\\n"
+                               "\\noindent\\textit{\\textbf{* Giải thích:} Hàm mục tiêu có thể giảm xuống vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Min Z là $-\\infty$.}\\n\n";
+            }
+
+            bool isLastStepTex = (stepIdx == currentHistory.size() - 1);
+            if (step.pivotCol >= 0 && step.pivotRow >= 0) {
+                QString enterVar = getVarNameTex(step.pivotCol);
+                QString leaveVar = "?";
+                if (step.currentBasicVars[step.pivotRow] >= 0 &&
+                    step.currentBasicVars[step.pivotRow] < (int)varNames.size()) {
+                    leaveVar = getVarNameTex(step.currentBasicVars[step.pivotRow]);
+                }
+
+                if (stepIdx == 0 && isPhase1Loc) {
+                    tex += "\\noindent\\textit{$\\rightarrow$ \\textbf{Phép xoay đặc biệt:} Đưa biến phụ $" + colorTexVar(enterVar, "green!50!black") + "$ vào cơ sở để thay thế $" + colorTexVar(leaveVar, "red") + "$ nhằm làm vế phải dương.}\\\\[0.15cm]\n";
+                } else {
+                    tex += "\\noindent\\textit{$\\rightarrow$ Chọn $" + colorTexVar(enterVar, "green!50!black") + "$ làm biến vào, đẩy $" + colorTexVar(leaveVar, "red") + "$ ra khỏi cơ sở.}\\\\[0.15cm]\n";
+
+                    if (zText.contains("Vô số nghiệm", Qt::CaseInsensitive) && stepIdx + 2 == currentHistory.size()) {
+                        tex += "\\noindent\\textcolor{red}{$\\rightarrow$ \\textbf{Kết luận:} Đã đạt từ vựng tối ưu và bài toán có vô số nghiệm.}\\\\[0.1cm]\n";
+                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích vô số nghiệm:} vì tồn tại hệ số của biến không cơ sở ở hàm mục tiêu bằng 0 nên bài toán có vô số nghiệm tối ưu.}}\\\\\n";
+                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích cách đọc nghiệm:} cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.}}\\\\\n";
+                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích giá trị tối ưu:} " + texOptZ + "}}\\\\\n";
+                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Lưu ý:} Bước xoay tiếp theo chỉ để tìm tọa độ tối ưu thứ 2.}}\\\\[0.15cm]\n";
+                    }
+                }
+            } else {
+                if (!isLastStepTex) {
+                    if (isPhase1Loc) {
+                        tex += "\\noindent\\textcolor{red}{$\\rightarrow$ \\textbf{Kết luận:} Đã đạt từ vựng tối ưu của Pha 1.}\\\\[0.1cm]\n";
+                    } else {
+                        tex += "\\noindent\\textit{$\\rightarrow$ Hệ phương trình đã sẵn sàng. Tiếp tục thuật toán Đơn hình.}\\\\[0.15cm]\n";
+                    }
+                } else {
+                    if (zText.contains("Không giới nội", Qt::CaseInsensitive)) {
+                        tex += "\\noindent\\textcolor{red}{$\\rightarrow$ \\textbf{Kết luận:} Bài toán không giới nội. Dừng thuật toán.}\\\\[0.1cm]\n";
+                        tex += texUnbounded;
+                    } else if (zText.contains("Vô nghiệm", Qt::CaseInsensitive)) {
+                        tex += "\\noindent\\textcolor{red}{$\\rightarrow$ \\textbf{Kết luận:} Bài toán vô nghiệm. Dừng thuật toán.}\\\\[0.1cm]\n";
+                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích:} Hệ ràng buộc mâu thuẫn nhau nên không tồn tại phương án thỏa mãn tất cả các ràng buộc.}}\\\\[0.15cm]\n";
+                    } else if (zText.contains("Vô số nghiệm", Qt::CaseInsensitive)) {
+                        tex += "\\noindent\\textcolor{red}{$\\rightarrow$ \\textbf{Kết luận:} Đã tìm được tọa độ tối ưu thứ 2. Dừng thuật toán.}\\\\[0.1cm]\n";
+                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích cách lấy nghiệm tối ưu:} cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.}}\\\\\n";
+                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích giá trị tối ưu:} " + texOptZ + "}}\\\\[0.15cm]\n";
+                    } else {
+                        tex += "\\noindent\\textcolor{red}{$\\rightarrow$ \\textbf{Kết luận:} Đã đạt từ vựng tối ưu. Dừng thuật toán.}\\\\[0.1cm]\n";
+                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích cách đọc nghiệm:} cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.}}\\\\\n";
+                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích giá trị tối ưu:} " + texOptZ + "}}\\\\[0.15cm]\n";
+                    }
+                }
+            }
+
             tex += "\\begin{center}\n\\[\n\\begin{array}{r c r " + QString("c r l ").repeated(nonBasicVars.size()) + "}\n";
 
             std::vector<int> rowOrder;
             rowOrder.push_back(m);
-            for (int i = 0; i < m; ++i) rowOrder.push_back(i);
+            for (int i = 0; i < m; ++i) { rowOrder.push_back(i); }
 
             bool isFirstConstraintRowTex = true;
             for (int i : rowOrder) {
@@ -498,7 +717,10 @@ WdSolve::WdSolve(QWidget *parent)
                     isFirstConstraintRowTex = false;
                 }
 
-                QString lhsVar = isZRow ? (isPhase1Loc ? "\\xi" : (currentOriginalLp.isMaximize ? "-Z" : "Z")) : varNames[step.currentBasicVars[i]];
+                QString lhsVar = isZRow ? (isPhase1Loc ? "\\xi" : (currentOriginalLp.isMaximize ? "-Z" : "Z")) : getVarNameTex(step.currentBasicVars[i]);
+                if (!isZRow && i == step.pivotRow) {
+                    lhsVar = colorTexVar(lhsVar, "red");
+                }
                 tex += lhsVar + " & = & ";
 
                 double rhsVal = isZRow ? -step.matrix[m][n] : step.matrix[i][n];
@@ -531,7 +753,11 @@ WdSolve::WdSolve(QWidget *parent)
 
                         bool isOne = (std::abs(std::abs(coeff) - 1.0) < 1e-9);
                         QString cStr = isOne ? "" : formatCoeff(coeff);
-                        tex += " & " + sign + " & " + cStr + " & " + varNames[j];
+                        QString rhsVar = getVarNameTex(j);
+                        if (j == step.pivotCol) {
+                            rhsVar = colorTexVar(rhsVar, "green!50!black");
+                        }
+                        tex += " & " + sign + " & " + cStr + " & " + rhsVar;
                     }
                 }
                 tex += " \\\\\n";
@@ -556,13 +782,13 @@ WdSolve::WdSolve(QWidget *parent)
         }
         tex += "\\end{document}";
 
+
         QDialog *previewDialog = new QDialog(this);
-        previewDialog->setWindowTitle("Xem trước Báo cáo PDF");
-        previewDialog->resize(950, 750);
+        previewDialog->setWindowTitle("Xem lời giải với PDF");
+        previewDialog->resize(1250, 880);
         QVBoxLayout *dlgLayout = new QVBoxLayout(previewDialog);
 
-        QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
-        bool isDark = settings.value("dark_mode", false).toBool();
+        bool isDark = readDarkModeSetting();
         if (isDark) {
             previewDialog->setStyleSheet("QDialog { background-color: #1E1E2E; } QPushButton { background-color: #313244; color: #CDD6F4; border: 1px solid #45475A; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #45475A; }");
         } else {
@@ -570,7 +796,7 @@ WdSolve::WdSolve(QWidget *parent)
         }
 
         QTextBrowser *previewBrowser = new QTextBrowser(previewDialog);
-        previewBrowser->setStyleSheet("QTextBrowser { background-color: #FFFFFF; color: #000000; padding: 20px; border-radius: 4px; border: 1px solid gray;}");
+        previewBrowser->setStyleSheet("QTextBrowser { background-color: #FFFFFF; color: #000000; padding: 28px 36px; border-radius: 4px; border: 1px solid #BDBDBD;}");
         previewBrowser->setHtml(html);
         dlgLayout->addWidget(previewBrowser);
 
@@ -597,18 +823,101 @@ WdSolve::WdSolve(QWidget *parent)
             }
         });
 
-        connect(btnDownloadPdf, &QPushButton::clicked, previewDialog, [previewDialog, previewBrowser]() {
+        connect(btnDownloadPdf, &QPushButton::clicked, previewDialog, [previewDialog, tex]() {
             QString fileName = QFileDialog::getSaveFileName(previewDialog, "Lưu file PDF", "BaoCao_QHTT.pdf", "PDF Files (*.pdf)");
-            if (!fileName.isEmpty()) {
-                QPdfWriter pdfWriter(fileName);
-                pdfWriter.setPageSize(QPageSize(QPageSize::A4));
-                pdfWriter.setResolution(300);
-                QMarginsF margins(15, 15, 15, 15);
-                pdfWriter.setPageMargins(margins, QPageLayout::Millimeter);
+            if (fileName.isEmpty()) return;
 
-                previewBrowser->document()->print(&pdfWriter);
-                QMessageBox::information(previewDialog, "Thành công", "Đã lưu thành công file PDF!");
+            // [FIX PDF EXPORT]
+            // Cấu trúc bảng từ vựng có nhiều cột căn chỉnh toán học.
+            // QTextDocument + QPdfWriter không render ổn định kiểu bảng này nên dễ bị mất cột/tràn dòng.
+            // Vì vậy khi tải PDF, biên dịch trực tiếp chuỗi LaTeX (.tex) sang PDF bằng xelatex/tectonic.
+            QString compilerPath = QStandardPaths::findExecutable("xelatex");
+            bool useTectonic = false;
+
+            if (compilerPath.isEmpty()) {
+                compilerPath = QStandardPaths::findExecutable("tectonic");
+                useTectonic = !compilerPath.isEmpty();
             }
+
+            if (compilerPath.isEmpty()) {
+                QMessageBox::warning(
+                    previewDialog,
+                    "Thiếu trình biên dịch LaTeX",
+                    "Không tìm thấy xelatex hoặc tectonic trên máy.\n\n"
+                    "Để xuất PDF với cấu trúc công thức căn chỉnh đẹp và không bị lỗi, "
+                    "vui lòng cài TeX Live/MiKTeX hoặc Tectonic.\n\n"
+                    "Bạn vẫn có thể bấm 'Tải xuống .tex' để lưu file LaTeX và biên dịch thủ công."
+                    );
+                return;
+            }
+
+            QTemporaryDir tempDir;
+            if (!tempDir.isValid()) {
+                QMessageBox::critical(previewDialog, "Lỗi", "Không tạo được thư mục tạm để biên dịch PDF.");
+                return;
+            }
+
+            QString texPath = tempDir.filePath("BaoCao_QHTT.tex");
+            QFile texFile(texPath);
+            if (!texFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                QMessageBox::critical(previewDialog, "Lỗi", "Không ghi được file LaTeX tạm.");
+                return;
+            }
+
+            QTextStream out(&texFile);
+            out.setEncoding(QStringConverter::Utf8);
+            out << tex;
+            texFile.close();
+
+            QProcess process;
+            process.setWorkingDirectory(tempDir.path());
+
+            QStringList args;
+            if (useTectonic) {
+                args << "--outdir" << tempDir.path() << texPath;
+            } else {
+                args << "-interaction=nonstopmode" << "-halt-on-error" << "BaoCao_QHTT.tex";
+            }
+
+            process.start(compilerPath, args);
+            if (!process.waitForStarted(5000)) {
+                QMessageBox::critical(previewDialog, "Lỗi", "Không khởi động được trình biên dịch LaTeX.");
+                return;
+            }
+
+            if (!process.waitForFinished(120000)) {
+                process.kill();
+                process.waitForFinished();
+                QMessageBox::critical(previewDialog, "Lỗi", "Biên dịch LaTeX quá lâu hoặc bị treo.");
+                return;
+            }
+
+            QString pdfTempPath = tempDir.filePath("BaoCao_QHTT.pdf");
+            if (process.exitStatus() != QProcess::NormalExit ||
+                process.exitCode() != 0 ||
+                !QFileInfo::exists(pdfTempPath)) {
+                QString errorLog = QString::fromUtf8(process.readAllStandardError());
+                QString outputLog = QString::fromUtf8(process.readAllStandardOutput());
+
+                QMessageBox::critical(
+                    previewDialog,
+                    "Lỗi biên dịch LaTeX",
+                    "Không thể biên dịch file .tex thành PDF.\n\n"
+                    "Chi tiết lỗi:\n" + errorLog.left(2000) + "\n" + outputLog.left(2000)
+                    );
+                return;
+            }
+
+            if (QFileInfo::exists(fileName)) {
+                QFile::remove(fileName);
+            }
+
+            if (!QFile::copy(pdfTempPath, fileName)) {
+                QMessageBox::critical(previewDialog, "Lỗi", "Không thể lưu file PDF vào vị trí đã chọn.");
+                return;
+            }
+
+            QMessageBox::information(previewDialog, "Thành công", "Đã biên dịch và lưu thành công file PDF từ LaTeX!");
         });
 
         previewDialog->exec();
@@ -631,10 +940,12 @@ void WdSolve::displayResults(const LinearProgram& lp,
 {
     this->currentAltSolution = altSolution;
 
-    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QSettings settings(dataDir + "/settings.ini", QSettings::IniFormat);
-    bool isDark = settings.value("dark_mode", false).toBool();
+    // ĐỌC TRẠNG THÁI GIAO DIỆN SÁNG / TỐI TỪ MAINWINDOW
+    bool isDark = readDarkModeSetting();
 
+    // ===============================================================
+    // TIỀN XỬ LÝ LỊCH SỬ BƯỚC GIẢI
+    // ===============================================================
     std::vector<SimplexStep> modHistory = history;
     int vocabCount = 1;
     for (size_t i = 0; i < modHistory.size(); ++i) {
@@ -689,42 +1000,23 @@ void WdSolve::displayResults(const LinearProgram& lp,
         }
     }
 
-    int lastPhase1StepIdx = -1;
-    if (globalIsPhase1) {
-        lastPhase1StepIdx = modHistory.size() - 1;
-        for (size_t k = 0; k < modHistory.size(); ++k) {
-            if (modHistory[k].stepName.contains("Pha 2", Qt::CaseInsensitive)) {
-                lastPhase1StepIdx = k - 1;
-                break;
-            }
-        }
-    }
-
-    auto formatValUI = [](double val) -> QString {
-        if (std::abs(val) < 1e-9) return "0";
-        if (std::abs(val - std::round(val)) < 1e-9) return QString::number(std::round(val));
-        return QString::number(val, 'f', 2);
-    };
-
-    auto formatCoeffUI = [](double val) -> QString {
-        double v = std::abs(val);
-        if (std::abs(v - std::round(v)) < 1e-9) return QString::number(std::round(v));
-        return QString::number(v, 'f', 2);
-    };
-
+    // ---------------------------------------------------------------
+    // 1. KHU VỰC KẾT QUẢ VÀ BẢNG NGHIỆM
+    // ---------------------------------------------------------------
     QFont fontZ = ui->lineEdit_Z->font();
     fontZ.setBold(true);
     fontZ.setPointSize(12);
     ui->lineEdit_Z->setFont(fontZ);
 
+    // Tẩy CSS header cứng để ăn theo Theme tổng
     ui->table_solution->horizontalHeader()->setStyleSheet("");
 
     if (status == "Tối ưu" || status == "Vô số nghiệm") {
         double finalZ = optimalZ;
         if (status == "Vô số nghiệm")
-            ui->lineEdit_Z->setText(formatValUI(finalZ) + " (Vô số nghiệm)");
+            ui->lineEdit_Z->setText(QString::number(finalZ, 'f', 4) + " (Vô số nghiệm)");
         else
-            ui->lineEdit_Z->setText(formatValUI(finalZ));
+            ui->lineEdit_Z->setText(QString::number(finalZ, 'f', 4));
 
         int origN = (int)originalLp.varBounds.size();
         bool isInfinite = (status == "Vô số nghiệm");
@@ -750,21 +1042,22 @@ void WdSolve::displayResults(const LinearProgram& lp,
             itemVar->setTextAlignment(Qt::AlignCenter);
             ui->table_solution->setItem(i, 0, itemVar);
 
-            QTableWidgetItem *itemVal1 = new QTableWidgetItem(formatValUI(val1));
+            QTableWidgetItem *itemVal1 = new QTableWidgetItem(QString::number(val1, 'f', 4));
             itemVal1->setTextAlignment(Qt::AlignCenter);
             ui->table_solution->setItem(i, 1, itemVal1);
 
             if (isInfinite) {
                 double val2 = (i < (int)altSolution.size()) ? altSolution[i] : 0.0;
-                QTableWidgetItem *itemVal2 = new QTableWidgetItem(formatValUI(val2));
+                QTableWidgetItem *itemVal2 = new QTableWidgetItem(QString::number(val2, 'f', 4));
                 itemVal2->setTextAlignment(Qt::AlignCenter);
                 ui->table_solution->setItem(i, 2, itemVal2);
 
                 double delta = val2 - val1;
                 if (std::abs(delta) < 1e-9) delta = 0.0;
-                QTableWidgetItem *itemDelta = new QTableWidgetItem(formatValUI(delta));
+                QTableWidgetItem *itemDelta = new QTableWidgetItem(QString::number(delta, 'f', 4));
                 itemDelta->setTextAlignment(Qt::AlignCenter);
 
+                // MÀU NỀN CỘT VECTOR CHUYỂN ĐỔI THEO THEME
                 itemDelta->setBackground(QColor(isDark ? "#313244" : "#F0F8FF"));
                 ui->table_solution->setItem(i, 3, itemDelta);
             }
@@ -824,7 +1117,7 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
                     bool hasTerms = false;
                     if (std::abs(rhsVal) >= 1e-9) {
-                        eqStr = formatValUI(rhsVal);
+                        eqStr = QString::number(rhsVal, 'f', 2);
                         hasTerms = true;
                     }
 
@@ -833,18 +1126,18 @@ void WdSolve::displayResults(const LinearProgram& lp,
                         double coeff = -lastStep.matrix[rowIdx][j];
                         if (std::abs(coeff) >= 1e-9) {
                             if (hasTerms) {
-                                if (coeff > 0) eqStr += QString(" + %1 %2").arg(formatCoeffUI(coeff), varNames[j]);
-                                else eqStr += QString(" - %1 %2").arg(formatCoeffUI(std::abs(coeff)), varNames[j]);
+                                if (coeff > 0) eqStr += QString(" + %1 %2").arg(QString::number(coeff, 'f', 2), varNames[j]);
+                                else eqStr += QString(" - %1 %2").arg(QString::number(std::abs(coeff), 'f', 2), varNames[j]);
                             } else {
-                                if (coeff > 0) eqStr = QString("%1 %2").arg(formatCoeffUI(coeff), varNames[j]);
-                                else eqStr = QString("-%1 %2").arg(formatCoeffUI(std::abs(coeff)), varNames[j]);
+                                if (coeff > 0) eqStr = QString("%1 %2").arg(QString::number(coeff, 'f', 2), varNames[j]);
+                                else eqStr = QString("-%1 %2").arg(QString::number(std::abs(coeff), 'f', 2), varNames[j]);
                                 hasTerms = true;
                             }
                         }
                     }
 
                     if (!hasTerms) {
-                        eqStr = formatValUI(rhsVal);
+                        eqStr = QString::number(rhsVal, 'f', 2);
                     }
                     eqStr += " \u2265 0";
                 } else {
@@ -875,7 +1168,7 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
                     bool hasTerms = false;
                     if (std::abs(rhsVal) >= 1e-9) {
-                        eqStr = formatValUI(rhsVal);
+                        eqStr = QString::number(rhsVal, 'f', 2);
                         hasTerms = true;
                     }
 
@@ -884,16 +1177,16 @@ void WdSolve::displayResults(const LinearProgram& lp,
                         double coeff = -lastStep.matrix[rowIdx][j];
                         if (std::abs(coeff) >= 1e-9) {
                             if (hasTerms) {
-                                if (coeff > 0) eqStr += QString(" + %1 %2").arg(formatCoeffUI(coeff), varNames[j]);
-                                else eqStr += QString(" - %1 %2").arg(formatCoeffUI(std::abs(coeff)), varNames[j]);
+                                if (coeff > 0) eqStr += QString(" + %1 %2").arg(QString::number(coeff, 'f', 2), varNames[j]);
+                                else eqStr += QString(" - %1 %2").arg(QString::number(std::abs(coeff), 'f', 2), varNames[j]);
                             } else {
-                                if (coeff > 0) eqStr = QString("%1 %2").arg(formatCoeffUI(coeff), varNames[j]);
-                                else eqStr = QString("-%1 %2").arg(formatCoeffUI(std::abs(coeff)), varNames[j]);
+                                if (coeff > 0) eqStr = QString("%1 %2").arg(QString::number(coeff, 'f', 2), varNames[j]);
+                                else eqStr = QString("-%1 %2").arg(QString::number(std::abs(coeff), 'f', 2), varNames[j]);
                                 hasTerms = true;
                             }
                         }
                     }
-                    if (!hasTerms) eqStr = formatValUI(rhsVal);
+                    if (!hasTerms) eqStr = QString::number(rhsVal, 'f', 2);
                     eqStr += " \u2265 0";
                 } else {
                     eqStr = "Biến tham số tùy ý \u2265 0";
@@ -925,16 +1218,21 @@ void WdSolve::displayResults(const LinearProgram& lp,
         QMessageBox::critical(this, "Thông báo Thuật toán", status);
     }
 
+    // ---------------------------------------------------------------
+    // 2. KHU VỰC VẼ TỪ VỰNG VÀ BẢNG HTML TỰ ĐỘNG CHUYỂN MÀU THEO THEME
+    // ---------------------------------------------------------------
     ui->tabWidget_steps->clear();
 
     QTabWidget *vocabTabWidget = new QTabWidget();
     QTabWidget *tableTabWidget = new QTabWidget();
 
+    // MÀU TAB CSS CHUYỂN ĐỔI SÁNG TỐI
     QString bgTab = isDark ? "#181825" : "#FAFAFA";
     QString borderColor = isDark ? "#45475A" : "#a0a0a0";
     QString tabUnselectedBg = isDark ? "#313244" : "#e6e6e6";
     QString tabSelectedColor = isDark ? "#89B4FA" : "#0056b3";
     QString textColor = isDark ? "#CDD6F4" : "#333333";
+    QString hrColor = isDark ? "#CDD6F4" : "#999999";
 
     QString tabStyle = QString(
                            "QTabWidget::pane { border: 1px solid %1; background-color: %2; top: -1px; } "
@@ -947,13 +1245,18 @@ void WdSolve::displayResults(const LinearProgram& lp,
     vocabTabWidget->setStyleSheet(tabStyle);
     tableTabWidget->setStyleSheet(tabStyle);
 
+    bool isPhase1 = globalIsPhase1;
+
     for (size_t stepIdx = 0; stepIdx < modHistory.size(); ++stepIdx) {
         const SimplexStep& step = modHistory[stepIdx];
         int m = (int)step.matrix.size() - 1;
         int n = (int)step.matrix[0].size() - 1;
 
+        if (step.stepName.contains("Pha 2")) isPhase1 = false;
+
         QString vocabReadSol = "Để suy ra nghiệm, ta cho tất cả các biến không cơ sở (các biến nằm ở vế phải) bằng 0, khi đó các biến cơ sở (vế trái) sẽ nhận giá trị bằng đúng hằng số tự do của phương trình tương ứng.";
         QString tableReadSol = "Để suy ra nghiệm, ta cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở (ở cột Cơ sở) sẽ nhận giá trị bằng đúng giá trị tại cột RHS tương ứng.";
+
         QString vocabReadSol2 = "Để suy ra nghiệm tối ưu thứ 2, ta cho tất cả các biến không cơ sở (các biến nằm ở vế phải) bằng 0, khi đó các biến cơ sở (vế trái) sẽ nhận giá trị bằng đúng hằng số tự do của phương trình tương ứng.";
         QString tableReadSol2 = "Để suy ra nghiệm tối ưu thứ 2, ta cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở (ở cột Cơ sở) sẽ nhận giá trị bằng đúng giá trị tại cột RHS tương ứng.";
 
@@ -968,107 +1271,156 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
         QString commonIntroHtml = "";
 
-        if (step.pivotCol >= 0 && step.pivotRow >= 0) {
-            QString enterVar = (step.pivotCol < (int)varNames.size()) ? varNames[step.pivotCol] : "?";
-            QString leaveVar = (step.currentBasicVars[step.pivotRow] != -1 && step.currentBasicVars[step.pivotRow] < (int)varNames.size()) ? varNames[step.currentBasicVars[step.pivotRow]] : "?";
-
-            if (stepIdx == 0 && globalIsPhase1) {
-                commonIntroHtml += QString("<p style='color: #333333; font-size: 12pt; margin-bottom: 20px; font-style: italic;'>&rarr; <b>Phép xoay đặc biệt:</b> Đưa biến phụ <b><font color='green'>%1</font></b> vào cơ sở để thay thế <b><font color='red'>%2</font></b> nhằm làm vế phải dương.</p>").arg(enterVar).arg(leaveVar);
-            } else {
-                if (status.contains("Vô số nghiệm", Qt::CaseInsensitive) && stepIdx == modHistory.size() - 2) {
-                    commonIntroHtml += QString("<p style='color: #333333; font-size: 12pt; margin-bottom: 4px; margin-top: 8px; font-style: italic;'>&rarr; Chọn <b><font color='green'>%1</font></b> làm biến vào, đẩy <b><font color='red'>%2</font></b> ra khỏi cơ sở.</p>").arg(enterVar).arg(leaveVar);
-                    commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 4px; margin-top: 0px;'>&rarr; <b>Kết luận:</b> Đã đạt [TU_VUNG_BANG] tối ưu (có vô số nghiệm).</p>";
-                    commonIntroHtml += "<p style='color: #0056b3; font-size: 11.5pt; margin-bottom: 15px; margin-top: 0px; font-style: italic;'>";
-                    commonIntroHtml += "<b>* Giải thích vô số nghiệm:</b> vì tồn tại hệ số của biến không cơ sở ở hàm mục tiêu bằng 0 ở từ vựng tối ưu nên bài toán có vô số nghiệm tối ưu.<br>";
-                    commonIntroHtml += "<b>* Giải thích cách đọc nghiệm:</b> [READ_SOLUTION]<br>";
-                    commonIntroHtml += "<b>* Giải thích giá trị tối ưu:</b> [OPT_Z]<br>";
-                    commonIntroHtml += "<b>* Lưu ý:</b> Bước xoay tiếp theo chỉ để tìm tọa độ tối ưu thứ 2.</p>";
-                } else {
-                    commonIntroHtml += QString("<p style='color: #333333; font-size: 12pt; margin-bottom: 20px; font-style: italic;'>&rarr; Chọn <b><font color='green'>%1</font></b> làm biến vào, đẩy <b><font color='red'>%2</font></b> ra khỏi cơ sở.</p>").arg(enterVar).arg(leaveVar);
-                }
-            }
-        } else {
-            bool isLastStep = (stepIdx == modHistory.size() - 1);
-
-            if (globalIsPhase1 && (int)stepIdx == lastPhase1StepIdx) {
-                double xi_val = -step.matrix[m][n];
-                if (std::abs(xi_val) < 1e-9) {
-                    commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 5px;'>&rarr; <b>Kết luận:</b> Đã đạt [TU_VUNG_BANG] tối ưu của Pha 1.</p>";
-                    commonIntroHtml += "<p style='color: #0056b3; font-size: 11.5pt; margin-bottom: 20px; font-style: italic;'>";
-                    commonIntroHtml += "<b>* Giải thích:</b> [READ_SOLUTION]<br>";
-                    commonIntroHtml += "Vì giá trị tối ưu <b>&xi; = 0</b>, bài toán gốc có nghiệm khả thi. Thuật toán sẽ tiếp tục <b>chuyển sang Pha 2</b>.</p>";
-                } else {
-                    commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 5px;'>&rarr; <b>Kết luận:</b> Đã đạt [TU_VUNG_BANG] tối ưu của Pha 1.</p>";
-                    commonIntroHtml += "<p style='color: #0056b3; font-size: 11.5pt; margin-bottom: 20px; font-style: italic;'>";
-                    commonIntroHtml += "<b>* Giải thích:</b> [READ_SOLUTION]<br>";
-                    commonIntroHtml += "Vì giá trị tối ưu <b>&xi; &ne; 0</b> (khác 0), hệ ràng buộc của bài toán gốc mâu thuẫn nhau nên <b>không có nghiệm tối ưu cho bài toán</b>.</p>";
-                }
-            } else if (isLastStep) {
-                if (status.contains("xoay vòng", Qt::CaseInsensitive) || status.contains("Cycling", Qt::CaseInsensitive)) {
-                    commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 20px;'>&rarr; <b>Kết luận:</b> Phát hiện hiện tượng xoay vòng (Cycling). Dừng thuật toán.</p>";
-                } else if (status.contains("giới nội", Qt::CaseInsensitive)) {
-                    commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 5px;'>&rarr; <b>Kết luận:</b> Bài toán không giới nội. Dừng thuật toán.</p>";
-                    commonIntroHtml += "<p style='color: #0056b3; font-size: 11.5pt; margin-bottom: 20px; font-style: italic;'>";
-                    commonIntroHtml += "<b>* Giải thích không giới nội:</b> các hệ số đứng trước biến ứng với hệ số âm nhất ở hàm mục tiêu trong các phương trình ở hệ ràng buộc đều dương.<br>";
-                    if (originalLp.isMaximize) commonIntroHtml += "<b>* Giải thích:</b> Hàm mục tiêu có thể tăng lên vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Max Z là <b>+&infin;</b>.</p>";
-                    else commonIntroHtml += "<b>* Giải thích:</b> Hàm mục tiêu có thể giảm xuống vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Min Z là <b>-&infin;</b>.</p>";
-                } else if (status.contains("Vô nghiệm", Qt::CaseInsensitive)) {
-                    commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 20px;'>&rarr; <b>Kết luận:</b> Không có nghiệm tối ưu (Bài toán vô nghiệm). Dừng thuật toán.</p>";
-                } else {
-                    if (status.contains("Vô số nghiệm", Qt::CaseInsensitive)) {
-                        commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 5px;'>&rarr; <b>Kết luận:</b> Đã tìm được tọa độ tối ưu thứ 2. Dừng thuật toán.</p>";
-                    } else {
-                        commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 5px;'>&rarr; <b>Kết luận:</b> Đã đạt [TU_VUNG_BANG] tối ưu. Dừng thuật toán.</p>";
-                    }
-                    QString solStr = ""; bool firstVar = true;
-                    for (int i = 0; i < m; ++i) {
-                        int basicVarIndex = step.currentBasicVars[i];
-                        QString lhsVarName = (basicVarIndex != -1 && basicVarIndex < (int)varNames.size()) ? varNames[basicVarIndex] : "?";
-                        double rhsVal = step.matrix[i][n];
-                        if (std::abs(rhsVal) < 1e-9) rhsVal = 0.0;
-                        if (!firstVar) solStr += ", ";
-                        solStr += QString("%1 = %2").arg(lhsVarName).arg(formatValUI(rhsVal));
-                        firstVar = false;
-                    }
-                    commonIntroHtml += "<p style='color: #0056b3; font-size: 11.5pt; margin-bottom: 20px; font-style: italic;'>";
-                    if (status.contains("Vô số nghiệm", Qt::CaseInsensitive)) {
-                        commonIntroHtml += "<b>* Giải thích cách lấy nghiệm tối ưu:</b> [READ_SOLUTION_2]</p>";
-                    } else {
-                        commonIntroHtml += "<b>* Giải thích cách đọc nghiệm và giá trị tối ưu:</b> [READ_SOLUTION]<br>[OPT_Z]</p>";
-                    }
-                }
-            } else {
-                commonIntroHtml += "<p style='color: #333333; font-size: 12pt; margin-bottom: 20px; font-style: italic;'>&rarr; Hệ phương trình đã sẵn sàng. Tiếp tục thuật toán Đơn hình.</p>";
-            }
+        if (stepIdx == 0 && isPhase1) {
+            commonIntroHtml += "<div style='background-color: #f0fdf4; padding: 10px 15px; border-left: 4px solid #28a745; margin-bottom: 15px; font-size: 12pt; color: #333333;'>";
+            commonIntroHtml += "<b style='color: #28a745;'>Thiết lập bài toán phụ (Pha 1):</b><br/>";
+            commonIntroHtml += "Mục tiêu: Tìm Min &xi; = x0.<br/>";
+            commonIntroHtml += "<i>(Lưu ý: Bạn đang ở bước Khởi tạo. Biến x0 vừa được thêm vào hệ thống và chuẩn bị được thế chỗ vào cơ sở để làm hệ phương trình khả thi)</i>";
+            commonIntroHtml += "</div>";
         }
+        else if (step.stepName.contains("Khởi tạo Pha 2")) {
+            commonIntroHtml += "<div style='background-color: #e6f2ff; padding: 10px 15px; border-left: 4px solid #0056b3; margin-bottom: 15px; font-size: 12pt; color: #333333;'>";
+            commonIntroHtml += "<b style='color: #0056b3;'>Thay vào hàm mục tiêu gốc (Chuyển sang Pha 2):</b><br/>";
 
-        // --- RÁP HTML CHO TAB "DẠNG TỪ VỰNG" ---
-        QString htmlVocab = "<html><body style='font-family: \"Times New Roman\", serif; margin: 0; padding: 0; color: #333333;'>";
-        QString titleStrVocab = step.stepName.split(" (").first();
-        if (stepIdx == 0 && globalIsPhase1) titleStrVocab = "Từ vựng 1 (Khởi tạo Pha 1)";
-        else if (step.stepName.contains("Khởi tạo Pha 2")) titleStrVocab = "Từ vựng 1 (Khởi tạo Pha 2)";
-
-        htmlVocab += QString("<p style='color: #0056b3; font-size: 14pt; font-weight: bold; margin-bottom: 8px; margin-top: 0; border-bottom: 2px solid #0056b3; padding-bottom: 4px; display: inline-block;'>%1:</p>").arg(titleStrVocab);
-
-        if (step.stepName.contains("Khởi tạo Pha 2")) {
             QString origZStr = (originalLp.isMaximize ? "Max Z = " : "Min Z = ");
             bool isFirstOrig = true;
             for (size_t i = 0; i < originalLp.c.size(); ++i) {
                 if (std::abs(originalLp.c[i]) > 1e-9) {
                     double val = originalLp.c[i];
                     QString sign = (val > 0 && !isFirstOrig) ? " + " : (val < 0 ? " - " : "");
-                    origZStr += sign + formatCoeffUI(val) + " x" + QString::number(i+1);
+                    origZStr += sign + QString::number(std::abs(val), 'f', 2) + " x" + QString::number(i+1);
                     isFirstOrig = false;
                 }
             }
             if (isFirstOrig) origZStr += "0";
 
-            htmlVocab += "<div style='background-color: #e6f2ff; padding: 10px 15px; border-left: 4px solid #0056b3; margin-bottom: 15px; font-size: 12pt; color: #333333;'>";
-            htmlVocab += "<b style='color: #0056b3;'>Thay vào hàm mục tiêu gốc (Chuyển sang Pha 2):</b><br/>";
-            htmlVocab += "Hàm mục tiêu ban đầu: <b>" + origZStr + "</b><br/>";
-            if (originalLp.isMaximize) htmlVocab += "<i>(Thế các biến cơ sở ở bảng cuối Pha 1 vào hàm Z và lật ngược dấu toàn bộ phương trình thành -Z, ta thu được kết quả bên dưới)</i></div>";
-            else htmlVocab += "<i>(Thế các biến cơ sở ở bảng cuối Pha 1 vào hàm Z và rút gọn, ta thu được phương trình Z mới bên dưới)</i></div>";
+            commonIntroHtml += "Hàm mục tiêu ban đầu: <b>" + origZStr + "</b><br/>";
+
+            if (originalLp.isMaximize) {
+                commonIntroHtml += "<i>(Thế các biến cơ sở ở bảng cuối Pha 1 vào hàm Z và lật ngược dấu toàn bộ phương trình thành -Z, ta thu được kết quả bên dưới)</i>";
+            } else {
+                commonIntroHtml += "<i>(Thế các biến cơ sở ở bảng cuối Pha 1 vào hàm Z và rút gọn, ta thu được phương trình Z mới bên dưới)</i>";
+            }
+            commonIntroHtml += "</div>";
         }
+
+        std::vector<int> nonBasicVars;
+        for (int j = 0; j < n; ++j) {
+            bool isBasic = false;
+            for (int r = 0; r < m; ++r) {
+                if (step.currentBasicVars[r] == j) {
+                    isBasic = true; break;
+                }
+            }
+            if (!isBasic) nonBasicVars.push_back(j);
+        }
+
+        if (step.pivotCol >= 0 && step.pivotRow >= 0) {
+            QString enterVar = (step.pivotCol < (int)varNames.size()) ? varNames[step.pivotCol] : "?";
+            QString leaveVar = (step.currentBasicVars[step.pivotRow] != -1 && step.currentBasicVars[step.pivotRow] < (int)varNames.size()) ? varNames[step.currentBasicVars[step.pivotRow]] : "?";
+
+            if (stepIdx == 0 && isPhase1) {
+                commonIntroHtml += QString("<p style='color: #333333; font-size: 12pt; margin-bottom: 20px; font-style: italic;'>&rarr; <b>Phép xoay đặc biệt:</b> Đưa biến phụ <b><font color='green'>%1</font></b> vào cơ sở để thay thế <b><font color='red'>%2</font></b> nhằm làm vế phải dương.</p>")
+                                       .arg(enterVar).arg(leaveVar);
+            } else {
+                if (status.contains("Vô số nghiệm", Qt::CaseInsensitive) && stepIdx == modHistory.size() - 2) {
+                    commonIntroHtml += QString("<p style='color: #333333; font-size: 12pt; margin-bottom: 4px; margin-top: 8px; font-style: italic;'>&rarr; Chọn <b><font color='green'>%1</font></b> làm biến vào, đẩy <b><font color='red'>%2</font></b> ra khỏi cơ sở.</p>")
+                                           .arg(enterVar).arg(leaveVar);
+                    commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 4px; margin-top: 0px;'>&rarr; <b>Kết luận:</b> Đã đạt [TU_VUNG_BANG] tối ưu (có vô số nghiệm).</p>";
+                    commonIntroHtml += "<p style='color: #0056b3; font-size: 11.5pt; margin-bottom: 15px; margin-top: 0px; font-style: italic;'>";
+
+                    commonIntroHtml += "<b>* Giải thích vô số nghiệm:</b> vì tồn tại hệ số của biến không cơ sở ở hàm mục tiêu bằng 0 nên có vô số nghiệm tối ưu.<br>";
+                    commonIntroHtml += "<b>* Giải thích cách đọc nghiệm:</b> [READ_SOLUTION]<br>";
+                    commonIntroHtml += "<b>* Giải thích giá trị tối ưu:</b> [OPT_Z]<br>";
+                    commonIntroHtml += "<b>* Lưu ý:</b> Bước xoay tiếp theo chỉ để tìm tọa độ tối ưu thứ 2.";
+                    commonIntroHtml += "</p>";
+                } else {
+                    commonIntroHtml += QString("<p style='color: #333333; font-size: 12pt; margin-bottom: 20px; font-style: italic;'>&rarr; Chọn <b><font color='green'>%1</font></b> làm biến vào, đẩy <b><font color='red'>%2</font></b> ra khỏi cơ sở.</p>")
+                                           .arg(enterVar).arg(leaveVar);
+                }
+            }
+        } else {
+            bool isLastStep = (stepIdx == modHistory.size() - 1);
+
+            if (!isLastStep) {
+                if (isPhase1) {
+                    commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 5px;'>&rarr; <b>Kết luận:</b> Đã đạt [TU_VUNG_BANG] tối ưu của Pha 1.</p>";
+                    commonIntroHtml += "<p style='color: #0056b3; font-size: 11.5pt; margin-bottom: 20px; font-style: italic;'>";
+                    commonIntroHtml += "<b>* Giải thích:</b> [READ_SOLUTION]<br>";
+                    commonIntroHtml += "Vì giá trị tối ưu <b>&xi; = 0</b>, bài toán gốc có nghiệm khả thi. Thuật toán sẽ tiếp tục <b>chuyển sang Pha 2</b>.";
+                    commonIntroHtml += "</p>";
+                } else {
+                    commonIntroHtml += "<p style='color: #333333; font-size: 12pt; margin-bottom: 20px; font-style: italic;'>&rarr; Hệ phương trình đã sẵn sàng. Tiếp tục thuật toán Đơn hình.</p>";
+                }
+            } else {
+                if (status.contains("xoay vòng", Qt::CaseInsensitive) || status.contains("Cycling", Qt::CaseInsensitive)) {
+                    commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 20px;'>&rarr; <b>Kết luận:</b> Phát hiện hiện tượng xoay vòng (Cycling). Dừng thuật toán.</p>";
+                } else if (status.contains("giới nội", Qt::CaseInsensitive)) {
+                    commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 5px;'>&rarr; <b>Kết luận:</b> Bài toán không giới nội. Dừng thuật toán.</p>";
+                    commonIntroHtml += "<p style='color: #0056b3; font-size: 11.5pt; margin-bottom: 20px; font-style: italic;'>";
+
+                    commonIntroHtml += "<b>* Giải thích không giới nội:</b> các hệ số đứng trước biến ứng với hệ số âm nhất ở hàm mục tiêu trong các phương trình ở hệ ràng buộc đều dương.<br>";
+
+                    if (originalLp.isMaximize) {
+                        commonIntroHtml += "<b>* Giải thích:</b> Hàm mục tiêu có thể tăng lên vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Max Z là <b>+&infin;</b>.";
+                    } else {
+                        commonIntroHtml += "<b>* Giải thích:</b> Hàm mục tiêu có thể giảm xuống vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Min Z là <b>-&infin;</b>.";
+                    }
+                    commonIntroHtml += "</p>";
+                } else if (status.contains("Vô nghiệm", Qt::CaseInsensitive)) {
+                    if (isPhase1) {
+                        commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 5px;'>&rarr; <b>Kết luận:</b> Đã đạt [TU_VUNG_BANG] tối ưu của Pha 1.</p>";
+                        commonIntroHtml += "<p style='color: #0056b3; font-size: 11.5pt; margin-bottom: 20px; font-style: italic;'>";
+                        commonIntroHtml += "<b>* Giải thích:</b> [READ_SOLUTION]<br>";
+                        commonIntroHtml += "Vì giá trị tối ưu <b>&xi; &ne; 0</b> (khác 0), hệ ràng buộc của bài toán gốc mâu thuẫn nhau nên <b>không có nghiệm tối ưu cho bài toán</b>.";
+                        commonIntroHtml += "</p>";
+                    } else {
+                        commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 20px;'>&rarr; <b>Kết luận:</b> Bài toán vô nghiệm. Dừng thuật toán.</p>";
+                    }
+                } else {
+                    if (status.contains("Vô số nghiệm", Qt::CaseInsensitive)) {
+                        commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 5px;'>&rarr; <b>Kết luận:</b> Đã tìm được tọa độ tối ưu thứ 2. Dừng thuật toán.</p>";
+                    } else {
+                        commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 5px;'>&rarr; <b>Kết luận:</b> Đã đạt [TU_VUNG_BANG] tối ưu. Dừng thuật toán.</p>";
+                    }
+
+                    QString solStr = "";
+                    bool firstVar = true;
+                    for (int i = 0; i < m; ++i) {
+                        int basicVarIndex = step.currentBasicVars[i];
+                        QString lhsVarName = (basicVarIndex != -1 && basicVarIndex < (int)varNames.size()) ? varNames[basicVarIndex] : "?";
+                        double rhsVal = step.matrix[i][n];
+                        if (std::abs(rhsVal) < 1e-9) rhsVal = 0.0;
+                        if (!firstVar) solStr += ", ";
+                        solStr += QString("%1 = %2").arg(lhsVarName).arg(QString::number(rhsVal, 'f', 2));
+                        firstVar = false;
+                    }
+
+                    commonIntroHtml += "<p style='color: #0056b3; font-size: 11.5pt; margin-bottom: 20px; font-style: italic;'>";
+
+                    if (status.contains("Vô số nghiệm", Qt::CaseInsensitive)) {
+                        commonIntroHtml += "<b>* Giải thích cách lấy nghiệm tối ưu:</b> [READ_SOLUTION_2]";
+                    } else {
+                        commonIntroHtml += "<b>* Giải thích cách đọc nghiệm và giá trị tối ưu:</b> [READ_SOLUTION]<br>[OPT_Z]";
+                    }
+                    commonIntroHtml += "</p>";
+                }
+            }
+        }
+
+        // --- 2.2 RÁP HTML CHO TAB "DẠNG TỪ VỰNG" ---
+        QString htmlVocab = "<html><body style='font-family: \"Times New Roman\", serif; margin: 0; padding: 0; color: #333333;'>";
+        QString titleStrVocab;
+        if (stepIdx == 0) {
+            if (isPhase1) titleStrVocab = "Từ vựng 1 (Khởi tạo Pha 1)";
+            else titleStrVocab = "Từ vựng 1";
+        } else if (step.stepName.contains("Khởi tạo Pha 2")) {
+            titleStrVocab = "Từ vựng 1 (Khởi tạo Pha 2)";
+        } else {
+            titleStrVocab = step.stepName.split(" (").first();
+        }
+
+        htmlVocab += QString("<p style='color: #0056b3; font-size: 14pt; font-weight: bold; margin-bottom: 8px; margin-top: 0; border-bottom: 2px solid #0056b3; padding-bottom: 4px; display: inline-block;'>%1:</p>").arg(titleStrVocab);
 
         QString vocabIntroHtml = commonIntroHtml;
         vocabIntroHtml.replace("[TU_VUNG_BANG]", "từ vựng");
@@ -1077,95 +1429,81 @@ void WdSolve::displayResults(const LinearProgram& lp,
         vocabIntroHtml.replace("[OPT_Z]", vocabOptZ);
         htmlVocab += vocabIntroHtml;
 
-        bool isPhase1Loc = globalIsPhase1 && ((int)stepIdx <= lastPhase1StepIdx);
+        htmlVocab += "<table align='center' cellpadding='8' cellspacing='0' style='margin-top: 10px;'>";
 
-        std::vector<int> nonBasicVars;
-        for (int j = 0; j < n; ++j) {
-            if (!isPhase1Loc && (varNames[j] == "x_0" || varNames[j] == "x0" || varNames[j] == "")) continue;
-            bool isBasic = false;
-            for (int r = 0; r < m; ++r) {
-                if (step.currentBasicVars[r] == j) { isBasic = true; break; }
-            }
-            if (!isBasic) nonBasicVars.push_back(j);
+        htmlVocab += "<tr style='font-size: 16pt; font-weight: bold;'>";
+        QString zLabel;
+        double zRhsVal = -step.matrix[m][n];
+        double coeffMultiplier = 1.0;
+
+        if (isPhase1) zLabel = "&xi;";
+        else zLabel = originalLp.isMaximize ? "-Z" : "Z";
+
+        htmlVocab += QString("<td align='right'>%1</td><td align='center'> = </td>").arg(zLabel);
+        if (std::abs(zRhsVal) < 1e-9) zRhsVal = 0.0;
+
+        if (stepIdx == 0 && isPhase1 && std::abs(zRhsVal) < 1e-9) {
+            htmlVocab += "<td></td>";
+        } else {
+            htmlVocab += QString("<td align='right'>%1</td>").arg(QString::number(zRhsVal, 'f', 2));
         }
 
-        // [FIX MỚI] Giao diện Từ Vựng: Dùng bảng chia cột cố định như khi xuất PDF để căn dọc tuyệt đối
-        htmlVocab += "<table align='center' cellpadding='0' cellspacing='0' style='margin-top: 10px; font-size: 15pt;'>";
+        for (int j : nonBasicVars) {
+            if (!isPhase1 && j < (int)varNames.size() && varNames[j] == "x0") continue;
+            double val = step.matrix[m][j];
+            if (std::abs(val) >= 1e-9) {
+                double coeff = val * coeffMultiplier;
+                QString sign = (coeff > 0) ? "+" : "-";
+                if (stepIdx == 0 && isPhase1 && std::abs(zRhsVal) < 1e-9 && coeff > 0) sign = "";
 
-        std::vector<int> rowOrder;
-        rowOrder.push_back(m);
-        for (int i = 0; i < m; ++i) rowOrder.push_back(i);
-
-        bool isFirstConstraintRow = true;
-        for (int i : rowOrder) {
-            bool isZRow = (i == m);
-            if (!isZRow && isFirstConstraintRow) {
-                htmlVocab += "<tr><td colspan='100' style='border: none; padding: 0;'><hr style='border-top: 1px solid black; margin: 6px 0;'></td></tr>";
-                isFirstConstraintRow = false;
-            }
-            htmlVocab += "<tr>";
-
-            QString vNameRaw = isZRow ? (isPhase1Loc ? "&xi;" : (currentOriginalLp.isMaximize ? "-Z" : "Z"))
-                                      : (step.currentBasicVars[i] != -1 ? varNames[step.currentBasicVars[i]] : "?");
-            QString lhsVarName = vNameRaw;
-            lhsVarName.replace(QRegularExpression("([a-zA-Z])(\\d+)"), "\\1<sub>\\2</sub>");
-            lhsVarName.replace("+", "<sup>+</sup>");
-            lhsVarName.replace("-", "<sup>-</sup>");
-            lhsVarName.replace("_0", "<sub>0</sub>");
-
-            if (!isZRow && i == step.pivotRow) lhsVarName = QString("<b><font color='red'>%1</font></b>").arg(lhsVarName);
-
-            htmlVocab += QString("<td width='40' align='right' style='padding: 4px 8px;'><b>%1</b></td>").arg(lhsVarName);
-            htmlVocab += "<td width='25' align='center' style='padding: 4px 8px;'> = </td>";
-
-            double rhsVal = isZRow ? -step.matrix[m][n] : step.matrix[i][n];
-            if (std::abs(rhsVal) < 1e-9) rhsVal = 0.0;
-
-            bool hasVarTerms = false;
-            for (int j : nonBasicVars) {
-                double coeff = -step.matrix[isZRow ? m : i][j];
-                if (isZRow && stepIdx == 0 && isPhase1Loc && (varNames[j] == "x_0" || varNames[j] == "x0")) coeff = 1.0;
-                if (std::abs(coeff) >= 1e-9) hasVarTerms = true;
-            }
-
-            bool hasConst = std::abs(rhsVal) >= 1e-9 || !hasVarTerms;
-            QString constStr = hasConst ? formatValUI(rhsVal) : "";
-            htmlVocab += QString("<td width='55' align='right' style='padding: 4px 8px;'>%1</td>").arg(constStr);
-
-            bool isFirstRhsTerm = !hasConst;
-
-            for (int j : nonBasicVars) {
-                QString varName = varNames[j];
-                varName.replace(QRegularExpression("([a-zA-Z])(\\d+)"), "\\1<sub>\\2</sub>");
-                varName.replace("+", "<sup>+</sup>");
-                varName.replace("-", "<sup>-</sup>");
-                varName.replace("_0", "<sub>0</sub>");
+                QString num = QString::number(std::abs(coeff), 'f', 2);
+                QString varName = (j < (int)varNames.size()) ? varNames[j] : "?";
                 if (j == step.pivotCol) varName = QString("<b><font color='green'>%1</font></b>").arg(varName);
 
-                double coeff = -step.matrix[isZRow ? m : i][j];
-                if (isZRow && stepIdx == 0 && isPhase1Loc && (varNames[j] == "x_0" || varNames[j] == "x0")) coeff = 1.0;
+                htmlVocab += QString("<td align='center'>%1</td><td align='right'>%2</td><td align='left'>%3</td>")
+                                 .arg(sign, num, varName);
+            } else {
+                htmlVocab += "<td></td><td></td><td></td>";
+            }
+        }
+        htmlVocab += "</tr>";
 
-                if (std::abs(coeff) < 1e-9) {
-                    htmlVocab += "<td width='20' style='padding: 0 4px;'></td><td width='45' style='padding: 0 2px;'></td><td width='30' style='padding: 0 2px;'></td>";
+        int totalCols = 3 + 3 * nonBasicVars.size();
+        htmlVocab += QString("<tr><td colspan='%1' style='padding: 2px 0;'><hr size='1' width='100%' color='%2' noshade='noshade' style='height: 1px; border: 0; margin: 0;'></td></tr>").arg(totalCols).arg(isDark ? "#FFFFFF" : "#999999");
+
+        for (int i = 0; i < m; ++i) {
+            htmlVocab += "<tr style='font-size: 15pt;'>";
+            int basicVarIndex = step.currentBasicVars[i];
+            QString lhsVarName = (basicVarIndex != -1 && basicVarIndex < (int)varNames.size()) ? varNames[basicVarIndex] : "?";
+            if (i == step.pivotRow) lhsVarName = QString("<b><font color='red'>%1</font></b>").arg(lhsVarName);
+
+            htmlVocab += QString("<td align='right'>%1</td><td align='center'> = </td>").arg(lhsVarName);
+            double rhsVal = step.matrix[i][n];
+            if (std::abs(rhsVal) < 1e-9) rhsVal = 0.0;
+            htmlVocab += QString("<td align='right'>%1</td>").arg(QString::number(rhsVal, 'f', 2));
+
+            for (int j : nonBasicVars) {
+                if (!isPhase1 && j < (int)varNames.size() && varNames[j] == "x0") continue;
+                double val = step.matrix[i][j];
+                if (std::abs(val) >= 1e-9) {
+                    double coeff = -val;
+                    QString sign = (coeff > 0) ? "+" : "-";
+                    QString num = QString::number(std::abs(coeff), 'f', 2);
+                    QString varName = (j < (int)varNames.size()) ? varNames[j] : "?";
+                    if (j == step.pivotCol) varName = QString("<b><font color='green'>%1</font></b>").arg(varName);
+
+                    htmlVocab += QString("<td align='center'>%1</td><td align='right'>%2</td><td align='left'>%3</td>")
+                                     .arg(sign, num, varName);
                 } else {
-                    QString sign = "";
-                    if (coeff > 0) sign = isFirstRhsTerm ? "" : "+";
-                    else sign = "-";
-                    isFirstRhsTerm = false;
-
-                    bool isOne = (std::abs(std::abs(coeff) - 1.0) < 1e-9);
-                    QString coeffStr = isOne ? "" : formatCoeffUI(coeff);
-
-                    htmlVocab += QString("<td width='20' align='center' style='padding: 0 4px;'>%1</td>").arg(sign);
-                    htmlVocab += QString("<td width='45' align='right' style='padding: 0 2px;'>%1</td>").arg(coeffStr);
-                    htmlVocab += QString("<td width='30' align='left' style='padding: 0 2px;'>%1</td>").arg(varName);
+                    htmlVocab += "<td></td><td></td><td></td>";
                 }
             }
             htmlVocab += "</tr>";
         }
         htmlVocab += "</table></body></html>";
 
-        // --- RÁP HTML CHO TAB "DẠNG BẢNG" ---
+
+        // --- 2.3 RÁP HTML CHO TAB "DẠNG BẢNG" ---
         QString htmlTable = "<html><body style='font-family: \"Times New Roman\", serif; margin: 0; padding: 0; color: #333333;'>";
         QString titleStrTable = titleStrVocab;
         titleStrTable.replace("Từ vựng", "Bảng");
@@ -1185,10 +1523,11 @@ void WdSolve::displayResults(const LinearProgram& lp,
         htmlTable += "<td>Cơ sở</td>";
         for (int j = 0; j < n; ++j) {
             QString vName = (j < (int)varNames.size()) ? varNames[j] : QString("x%1").arg(j);
-            if (!isPhase1Loc && (vName == "x0" || vName == "x_0" || vName == "")) continue;
+            if (!isPhase1 && vName == "x0") continue;
             htmlTable += QString("<td>%1</td>").arg(vName);
         }
-        htmlTable += "<td>RHS</td></tr>";
+        htmlTable += "<td>RHS</td>";
+        htmlTable += "</tr>";
 
         for (int i = 0; i < m; ++i) {
             htmlTable += "<tr style='font-size: 15pt;'>";
@@ -1201,46 +1540,53 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
             for (int j = 0; j < n; ++j) {
                 QString vName = (j < (int)varNames.size()) ? varNames[j] : "";
-                if (!isPhase1Loc && (vName == "x0" || vName == "x_0" || vName == "")) continue;
+                if (!isPhase1 && vName == "x0") continue;
 
                 double val = step.matrix[i][j];
                 if (std::abs(val) < 1e-9) val = 0.0;
 
                 if (i == step.pivotRow && j == step.pivotCol) {
-                    htmlTable += QString("<td style='background-color: #d4edda; font-weight: bold; color: #155724;'>%1</td>").arg(formatValUI(val));
+                    htmlTable += QString("<td style='background-color: #d4edda; font-weight: bold; color: #155724;'>%1</td>").arg(QString::number(val, 'f', 2));
                 } else {
-                    htmlTable += QString("<td>%1</td>").arg(formatValUI(val));
+                    htmlTable += QString("<td>%1</td>").arg(QString::number(val, 'f', 2));
                 }
             }
             double valRhs = step.matrix[i][n];
             if (std::abs(valRhs) < 1e-9) valRhs = 0.0;
-            htmlTable += QString("<td><b>%1</b></td>").arg(formatValUI(valRhs));
+            htmlTable += QString("<td><b>%1</b></td>").arg(QString::number(valRhs, 'f', 2));
             htmlTable += "</tr>";
         }
 
         htmlTable += "<tr style='background-color: #fff3cd; font-weight: bold; font-size: 15pt;'>";
-        QString zLabelTable = isPhase1Loc ? "&xi;" : (originalLp.isMaximize ? "-Z" : "Z");
+        QString zLabelTable;
+        if (isPhase1) zLabelTable = "&xi;";
+        else zLabelTable = originalLp.isMaximize ? "-Z" : "Z";
         htmlTable += QString("<td>%1</td>").arg(zLabelTable);
 
         for (int j = 0; j < n; ++j) {
             QString vName = (j < (int)varNames.size()) ? varNames[j] : "";
-            if (!isPhase1Loc && (vName == "x0" || vName == "x_0" || vName == "")) continue;
+            if (!isPhase1 && vName == "x0") continue;
 
             double val = -step.matrix[m][j];
             if (std::abs(val) < 1e-9) val = 0.0;
 
             if (j == step.pivotCol) {
-                htmlTable += QString("<td><b><font color='green'>%1</font></b></td>").arg(formatValUI(val));
+                htmlTable += QString("<td><b><font color='green'>%1</font></b></td>").arg(QString::number(val, 'f', 2));
             } else {
-                htmlTable += QString("<td>%1</td>").arg(formatValUI(val));
+                htmlTable += QString("<td>%1</td>").arg(QString::number(val, 'f', 2));
             }
         }
 
         double valZRhs = -step.matrix[m][n];
         if (std::abs(valZRhs) < 1e-9) valZRhs = 0.0;
-        htmlTable += QString("<td><b>%1</b></td>").arg(formatValUI(valZRhs));
-        htmlTable += "</tr></table></body></html>";
+        htmlTable += QString("<td><b>%1</b></td>").arg(QString::number(valZRhs, 'f', 2));
+        htmlTable += "</tr>";
+        htmlTable += "</table></body></html>";
 
+        // =======================================================================
+        // ÁP DỤNG DARK MODE LÊN MÃ NGUỒN HTML
+        // Thay thế toàn bộ mã màu cứng thành mã màu tối tương ứng
+        // =======================================================================
         if (isDark) {
             htmlVocab.replace("color: #333333", "color: #CDD6F4");
             htmlVocab.replace("color: #d9534f", "color: #F38BA8");
@@ -1277,6 +1623,7 @@ void WdSolve::displayResults(const LinearProgram& lp,
         textEditVocab->setStyleSheet(QString("QTextEdit { font-family: 'Times New Roman', serif; padding: 20px; border: none; background-color: %1; }").arg(isDark ? "#181825" : "#FAFAFA"));
         textEditVocab->setHtml(htmlVocab);
         vocabTabWidget->addTab(textEditVocab, step.stepName);
+
 
         QTextEdit *textEditTable = new QTextEdit();
         textEditTable->setReadOnly(true);
@@ -1335,8 +1682,8 @@ void WdSolve::on_pushButton_3_clicked()
     };
 
     auto formatNumber = [](double value) -> QString {
-        if (std::abs(value) < 1e-9) value = 0.0;
-        return QString::number(value, 'g', 10);
+        if (std::abs(value) < 1e-9) value = 0.00;
+        return QString::number(value, 'f', 2);
     };
 
     auto buildLinearExpression = [&](const std::vector<double>& coeffs, bool keepZeroTerms = false) -> QString {
@@ -1363,7 +1710,7 @@ void WdSolve::on_pushButton_3_clicked()
             }
         }
 
-        if (!hasTerm) expr = "0";
+        if (!hasTerm) expr = "0.00";
         return expr;
     };
 
