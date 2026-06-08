@@ -788,6 +788,18 @@ WdSolve::WdSolve(QWidget *parent)
         tex += "\\usepackage{fontspec}\n";
         tex += "\\usepackage[vietnamese]{babel}\n";
         tex += "\\usepackage{amsmath, geometry, array, amssymb, xcolor}\n";
+
+#ifdef Q_OS_WIN
+        // [FIX WINDOWS FONT]
+        // Trên Windows, Tectonic/XeTeX đôi khi lỗi khi fontspec mở font bằng đường dẫn tuyệt đối
+        // kiểu C:/.../fonts/NotoSerif-Regular.ttf. Vì vậy Windows dùng font hệ thống trước.
+        // Times New Roman hỗ trợ tiếng Việt tốt và có sẵn trên Windows.
+        // Nếu máy không có Times New Roman thì fallback sang Arial.
+        Q_UNUSED(bundledFontDir);
+        tex += "\\IfFontExistsTF{Times New Roman}{\\setmainfont{Times New Roman}}{\n";
+        tex += "\\IfFontExistsTF{Arial}{\\setmainfont{Arial}}{\\setmainfont{Latin Modern Roman}}}\n";
+#else
+        // Linux/macOS vẫn ưu tiên Noto Serif đóng gói kèm app để PDF tiếng Việt ổn định.
         if (!bundledFontDir.isEmpty()) {
             tex += "\\setmainfont{NotoSerif}[\n";
             tex += "  Path={" + bundledFontDir + "},\n";
@@ -799,8 +811,9 @@ WdSolve::WdSolve(QWidget *parent)
         } else {
             tex += "\\IfFontExistsTF{Noto Serif}{\\setmainfont{Noto Serif}}{\n";
             tex += "\\IfFontExistsTF{DejaVu Serif}{\\setmainfont{DejaVu Serif}}{\n";
-            tex += "\\IfFontExistsTF{Times New Roman}{\\setmainfont{Times New Roman}}{\\setmainfont{Arial Unicode MS}}}}\n";
+            tex += "\\IfFontExistsTF{Times New Roman}{\\setmainfont{Times New Roman}}{\\setmainfont{Latin Modern Roman}}}}\n";
         }
+#endif
         tex += "\\geometry{margin=1in}\n";
         tex += "\\sloppy\n";
         tex += "\\emergencystretch=2em\n";
@@ -2206,12 +2219,4 @@ void WdSolve::on_pushButton_3_clicked()
     contextString += "\n--- HƯỚNG DẪN DÀNH CHO BẠN (TRỢ LÝ AI) ---\n";
     contextString += "Bạn là một AI hỗ trợ giải đáp toán học môn Quy hoạch tuyến tính. Bạn CHỈ được phép giải thích hoặc trả lời các câu hỏi liên quan đến nội dung bài toán quy hoạch tuyến tính ở trên, phương pháp giải, hoặc các khái niệm toán học liên quan.\n";
     contextString += "Khi giải thích hệ ràng buộc, bắt buộc phải dùng đúng dấu ràng buộc đã cung cấp trong từng dòng R1, R2, ... Không được tự đổi chiều dấu và không được bỏ mất vế phải.\n";
-    contextString += "QUAN TRỌNG: Nếu người dùng hỏi bất kỳ câu hỏi ngoài lề (không thuộc phạm vi của bài toán hoặc quy hoạch tuyến tính), bạn KHÔNG ĐƯỢC trả lời nội dung đó. Bạn BẮT BUỘC phải trả lời chính xác bằng câu sau và không giải thích gì thêm:\n\"Xin lỗi câu hỏi của bạn không thuộc phạm vi của bài toán\"";
-
-    if (!this->wd_ChatBot) this->wd_ChatBot = new WdChatBot(this);
-
-    this->wd_ChatBot->setProblemContext(contextString);
-    this->wd_ChatBot->show();
-    this->wd_ChatBot->raise();
-    this->wd_ChatBot->activateWindow();
-}
+    contextString += "QUAN TRỌNG: Nếu người dùng hỏi bất kỳ câu hỏi ngoài lề (không thuộc phạm vi của bài toán hoặc quy hoạch tuyến tính), bạn KHÔNG ĐƯỢC trả lời nội dung đó. Bạn BẮT BUỘC phải trả lời chính xác bằng câu sau và không gi
