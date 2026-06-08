@@ -1098,7 +1098,17 @@ WdSolve::WdSolve(QWidget *parent)
 
             QString* stdOutLog = new QString();
             QString* stdErrLog = new QString();
-            bool* wasCanceled = new bool(false);
+
+            // [FIX KHÔNG BÁO HỦY GIẢ]
+            // QProgressDialog có thể phát tín hiệu canceled() khi ta gọi close()/reset()
+            // bằng code sau khi process đã kết thúc. Vì vậy phải tách rõ:
+            // - userCanceled: người dùng thật sự bấm Hủy
+            // - processFinished: process đã kết thúc, không được coi close() là hủy
+            // - timedOut: process bị timeout, hiển thị đúng là quá thời gian chứ không báo hủy.
+            bool* userCanceled = new bool(false);
+            bool* processFinished = new bool(false);
+            bool* timedOut = new bool(false);
+            QMetaObject::Connection* cancelConnection = new QMetaObject::Connection();
 
             // RẤT QUAN TRỌNG: phải đọc stdout/stderr liên tục.
             // Nếu không, Tectonic in quá nhiều dòng "note: downloading ..." sẽ làm đầy pipe buffer
@@ -1113,8 +1123,10 @@ WdSolve::WdSolve(QWidget *parent)
                 if (stdErrLog->length() > 20000) *stdErrLog = stdErrLog->right(12000);
             });
 
-            QObject::connect(progress, &QProgressDialog::canceled, previewDialog, [process, wasCanceled]() {
-                *wasCanceled = true;
+            *cancelConnection = QObject::connect(progress, &QProgressDialog::canceled, previewDialog,
+                                                 [process, userCanceled, processFinished]() {
+                if (*processFinished) return;
+                *userCanceled = true;
                 if (process->state() != QProcess::NotRunning) {
                     process->kill();
                 }
@@ -1122,8 +1134,9 @@ WdSolve::WdSolve(QWidget *parent)
 
             QTimer* timeoutTimer = new QTimer(process);
             timeoutTimer->setSingleShot(true);
-            QObject::connect(timeoutTimer, &QTimer::timeout, previewDialog, [process, wasCanceled]() {
-                *wasCanceled = true;
+            QObject::connect(timeoutTimer, &QTimer::timeout, previewDialog, [process, timedOut, processFinished]() {
+                if (*processFinished) return;
+                *timedOut = true;
                 if (process->state() != QProcess::NotRunning) {
                     process->kill();
                 }
@@ -1132,7 +1145,16 @@ WdSolve::WdSolve(QWidget *parent)
             QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
                              previewDialog,
                              [=](int exitCode, QProcess::ExitStatus exitStatus) {
-                if (progress) progress->close();
+                *processFinished = true;
+                if (timeoutTimer) timeoutTimer->stop();
+
+                // Ngắt tín hiệu canceled() trước khi đóng progress để tránh QProgressDialog
+                // tự phát canceled() và làm app báo nhầm "Đã hủy" trên Windows/Linux/macOS.
+                if (cancelConnection) QObject::disconnect(*cancelConnection);
+                if (progress) {
+                    progress->hide();
+                    progress->deleteLater();
+                }
 
                 // Đọc nốt phần log còn lại để tránh mất lỗi thật.
                 *stdOutLog += QString::fromUtf8(process->readAllStandardOutput());
@@ -1143,8 +1165,28 @@ WdSolve::WdSolve(QWidget *parent)
                                 QFileInfo::exists(pdfTempPath) &&
                                 QFileInfo(pdfTempPath).size() > 0);
 
-                if (*wasCanceled) {
-                    QMessageBox::information(previewDialog, "Đã hủy", "Quá trình biên dịch PDF đã bị hủy.");
+                if (*userCanceled) {
+                    QMessageBox::information(previewDialog, "Đã hủy", "Quá trình biên dịch PDF đã bị hủy bởi người dùng.");
+                } else if (*timedOut) {
+                    bool fallbackOk = exportHtmlPdfFallback(fileName, html);
+                    QString log = compactLatexLog(*stdErrLog + "\n" + *stdOutLog);
+
+                    if (fallbackOk) {
+                        QMessageBox::warning(
+                            previewDialog,
+                            "Biên dịch LaTeX quá lâu",
+                            "Tectonic/XeLaTeX chạy quá thời gian cho phép nên đã được dừng lại.\n\n"
+                            "Phần mềm đã tự động lưu PDF bằng chế độ tương thích Qt để tránh treo ứng dụng.\n\n"
+                            "Log rút gọn:\n" + log
+                            );
+                    } else {
+                        QMessageBox::critical(
+                            previewDialog,
+                            "Lỗi biên dịch LaTeX",
+                            "Tectonic/XeLaTeX chạy quá thời gian cho phép và cũng không thể xuất bằng chế độ Qt.\n\n"
+                            "Log rút gọn:\n" + log
+                            );
+                    }
                 } else if (success) {
                     if (QFileInfo::exists(fileName)) QFile::remove(fileName);
 
@@ -1179,14 +1221,21 @@ WdSolve::WdSolve(QWidget *parent)
 
                 delete stdOutLog;
                 delete stdErrLog;
-                delete wasCanceled;
+                delete userCanceled;
+                delete processFinished;
+                delete timedOut;
+                delete cancelConnection;
                 delete tempDir;
                 process->deleteLater();
             });
 
             process->start(compilerPath, args);
             if (!process->waitForStarted(3000)) {
-                progress->close();
+                if (cancelConnection) QObject::disconnect(*cancelConnection);
+                if (progress) {
+                    progress->hide();
+                    progress->deleteLater();
+                }
                 bool fallbackOk = exportHtmlPdfFallback(fileName, html);
                 if (fallbackOk) {
                     QMessageBox::warning(previewDialog, "Không khởi động được LaTeX", "Phần mềm đã tự động xuất PDF bằng chế độ tương thích Qt.");
@@ -1195,7 +1244,10 @@ WdSolve::WdSolve(QWidget *parent)
                 }
                 delete stdOutLog;
                 delete stdErrLog;
-                delete wasCanceled;
+                delete userCanceled;
+                delete processFinished;
+                delete timedOut;
+                delete cancelConnection;
                 delete tempDir;
                 process->deleteLater();
                 return;
