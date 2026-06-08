@@ -1106,85 +1106,101 @@ WdSolve::WdSolve(QWidget *parent)
                                             int n,
                                             bool isPhase1Loc,
                                             size_t stepIdx) {
-            Q_UNUSED(n);
+            // [FIX PDF/TEX - 10 CỘT CHO MỖI TỪ VỰNG]
+            // Mỗi dòng từ vựng chỉ in tối đa 10 biến không cơ sở theo chiều ngang.
+            // Nếu số biến vượt quá 10 thì tự xuống dòng.
+            // Dòng xuống tiếp theo chỉ in phần còn lại của vế phải, KHÔNG lặp lại
+            // biến cơ sở, dấu "=" và hằng số tự do để bảng gọn và dễ đọc.
+            const int maxTermColumnsPerLine = 10;
 
-            std::vector<std::vector<int>> chunks = buildVariableChunksTex(nonBasicVars);
+            QString colSpec = "r@{\\;}c@{\\;}r";
+            for (int s = 0; s < maxTermColumnsPerLine; ++s) {
+                colSpec += "@{\\quad}c@{\\;}r@{\\;}l";
+            }
 
-            for (size_t chunkIdx = 0; chunkIdx < chunks.size(); ++chunkIdx) {
-                const std::vector<int>& chunk = chunks[chunkIdx];
-                int slotCount = std::max(1, (int)chunk.size());
+            tex += "\\begin{center}\n";
+            tex += "\\begin{adjustbox}{max width=\\textwidth}\n";
+            tex += "$\\begin{array}{" + colSpec + "}\n";
 
-                QString colSpec = "r@{\\;}c@{\\;}r";
-                for (int s = 0; s < slotCount; ++s) {
-                    colSpec += "@{\\quad}c@{\\;}r@{\\;}l";
+            bool separatorPrinted = false;
+
+            auto appendEmptyTermSlots = [&](int usedSlots) {
+                for (int pad = usedSlots; pad < maxTermColumnsPerLine; ++pad) {
+                    tex += " &  &  & ";
+                }
+            };
+
+            auto appendTermCell = [&](int varIdx, double coeff) {
+                if (std::abs(coeff) < 1e-9) {
+                    tex += " &  &  & ";
+                    return;
                 }
 
-                tex += "\\begin{center}\n";
-                tex += "\\begin{adjustbox}{max width=\\textwidth}\n";
-                tex += "$\\begin{array}{" + colSpec + "}\n";
+                QString sign = (coeff >= 0) ? "+" : "-";
+                bool isOne = (std::abs(std::abs(coeff) - 1.0) < 1e-9);
+                QString coeffStr = isOne ? "" : formatCoeff(coeff);
 
-                bool separatorPrinted = false;
+                QString rhsVar = getVarNameTex(varIdx);
+                if (varIdx == step.pivotCol) {
+                    rhsVar = colorTexVar(rhsVar, "ReportGreen");
+                }
 
-                for (size_t rr = 0; rr < rowOrder.size(); ++rr) {
-                    int rowIndex = rowOrder[rr];
-                    bool isZRow = (rowIndex == m);
+                tex += " & " + sign + " & " + coeffStr + " & " + rhsVar;
+            };
 
-                    QString lhsVar = isZRow
-                                         ? (isPhase1Loc ? "\\xi" : (currentOriginalLp.isMaximize ? "-Z" : "Z"))
-                                         : getVarNameTex(step.currentBasicVars[rowIndex]);
+            for (size_t rr = 0; rr < rowOrder.size(); ++rr) {
+                int rowIndex = rowOrder[rr];
+                bool isZRow = (rowIndex == m);
 
-                    if (!isZRow && rowIndex == step.pivotRow) {
-                        lhsVar = colorTexVar(lhsVar, "ReportRed");
-                    }
+                QString lhsVar = isZRow
+                                     ? (isPhase1Loc ? "\\xi" : (currentOriginalLp.isMaximize ? "-Z" : "Z"))
+                                     : getVarNameTex(step.currentBasicVars[rowIndex]);
 
-                    double rhsVal = isZRow ? -step.matrix[m][n] : step.matrix[rowIndex][n];
-                    if (std::abs(rhsVal) < 1e-9) rhsVal = 0.0;
+                if (!isZRow && rowIndex == step.pivotRow) {
+                    lhsVar = colorTexVar(lhsVar, "ReportRed");
+                }
 
-                    // Block đầu in đầy đủ lhs = rhs. Các block sau vẫn lặp lhs để người đọc
-                    // không bị mất ngữ cảnh khi phương trình dài phải chia block.
+                double rhsVal = isZRow ? -step.matrix[m][n] : step.matrix[rowIndex][n];
+                if (std::abs(rhsVal) < 1e-9) rhsVal = 0.0;
+
+                // Nếu không có biến không cơ sở, vẫn in dòng lhs = rhs.
+                if (nonBasicVars.empty()) {
                     tex += lhsVar + " & = & " + formatVal(rhsVal);
-
-                    for (int varIdx : chunk) {
-                        double coeff = coeffInDictionaryTex(step, rowIndex, varIdx, m, isPhase1Loc, stepIdx);
-
-                        if (std::abs(coeff) < 1e-9) {
-                            tex += " &  &  & ";
-                        } else {
-                            QString sign = (coeff >= 0) ? "+" : "-";
-                            bool isOne = (std::abs(std::abs(coeff) - 1.0) < 1e-9);
-                            QString coeffStr = isOne ? "" : formatCoeff(coeff);
-
-                            QString rhsVar = getVarNameTex(varIdx);
-                            if (varIdx == step.pivotCol) {
-                                rhsVar = colorTexVar(rhsVar, "ReportGreen");
-                            }
-
-                            tex += " & " + sign + " & " + coeffStr + " & " + rhsVar;
-                        }
-                    }
-
-                    // Nếu block rỗng hoặc thiếu slot, thêm ô rỗng để số cột luôn đúng.
-                    for (int pad = (int)chunk.size(); pad < slotCount; ++pad) {
-                        tex += " &  &  & ";
-                    }
-
+                    appendEmptyTermSlots(0);
                     tex += " \\\\\n";
+                } else {
+                    for (int start = 0; start < (int)nonBasicVars.size(); start += maxTermColumnsPerLine) {
+                        int take = std::min(maxTermColumnsPerLine, (int)nonBasicVars.size() - start);
+                        bool isContinuationLine = (start > 0);
 
-                    // Kẻ dòng sau hàng mục tiêu trong mỗi block để tách rõ hàm mục tiêu và ràng buộc.
-                    if (isZRow && !separatorPrinted) {
-                        tex += "\\noalign{\\vskip 2pt}\\hline\\noalign{\\vskip 2pt}\n";
-                        separatorPrinted = true;
+                        if (isContinuationLine) {
+                            // Dòng xuống tiếp theo: không ghi lại biến cơ sở, dấu "=" và hằng số tự do.
+                            tex += " & & ";
+                        } else {
+                            tex += lhsVar + " & = & " + formatVal(rhsVal);
+                        }
+
+                        for (int offset = 0; offset < take; ++offset) {
+                            int varIdx = nonBasicVars[start + offset];
+                            double coeff = coeffInDictionaryTex(step, rowIndex, varIdx, m, isPhase1Loc, stepIdx);
+                            appendTermCell(varIdx, coeff);
+                        }
+
+                        appendEmptyTermSlots(take);
+                        tex += " \\\\\n";
                     }
                 }
 
-                tex += "\\end{array}$\n";
-                tex += "\\end{adjustbox}\n";
-                tex += "\\end{center}\n";
-
-                if (chunkIdx + 1 < chunks.size()) {
-                    tex += "\\vspace{-0.08cm}\n";
+                // Kẻ dòng sau toàn bộ dòng mục tiêu, bao gồm cả các dòng xuống tiếp theo.
+                if (isZRow && !separatorPrinted) {
+                    tex += "\\noalign{\\vskip 2pt}\\hline\\noalign{\\vskip 2pt}\n";
+                    separatorPrinted = true;
                 }
             }
+
+            tex += "\\end{array}$\n";
+            tex += "\\end{adjustbox}\n";
+            tex += "\\end{center}\n";
         };
 
         tex += "\\ReportSection{2. Các bước giải (dạng từ vựng)}\n";
