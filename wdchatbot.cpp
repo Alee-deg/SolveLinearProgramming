@@ -25,7 +25,7 @@
 #include <functional>
 
 // =======================================================================
-// [FIX LƯU TRỮ] Hàm lấy đường dẫn an toàn CHỈ DÀNH CHO API KEY
+// Hàm lấy đường dẫn an toàn CHỈ DÀNH CHO API KEY
 // =======================================================================
 static QString getApiKeyPath() {
     QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -37,13 +37,13 @@ static QString getApiKeyPath() {
 }
 
 // =======================================================================
-// Hàm xác thực API Key ngầm (Không làm đơ màn hình)
+// Hàm xác thực API Key ngầm
 // =======================================================================
 static void verifyAndSaveApiKey(WdChatBot* parentWindow, QTextEdit* chatDisplay, const QString& newKey, std::function<void(bool)> onFinished) {
     QNetworkAccessManager *manager = new QNetworkAccessManager(parentWindow);
     QNetworkRequest request(QUrl("https://api.groq.com/openai/v1/models"));
 
-    // [FIX LINUX WAF] Thêm các Header tiêu chuẩn để tránh bị Cloudflare/Groq chặn gói tin
+    // Thêm các Header tiêu chuẩn để tránh bị Cloudflare/Groq chặn gói tin
     request.setRawHeader("Authorization", "Bearer " + newKey.trimmed().toUtf8());
     request.setRawHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
     request.setRawHeader("Accept", "application/json");
@@ -59,7 +59,7 @@ static void verifyAndSaveApiKey(WdChatBot* parentWindow, QTextEdit* chatDisplay,
             QSettings apiSettings(getApiKeyPath(), QSettings::IniFormat);
             apiSettings.setValue("api_key", newKey.trimmed());
 
-            // Chỉ tô màu chữ "Hệ thống:", phần sau tự kế thừa màu Theme
+            // Tô màu chữ "Hệ thống:", phần sau tự kế thừa màu Theme
             chatDisplay->append("<div style='margin-bottom: 5px;'><b style='color: #28A745;'>Hệ thống:</b> API Key đã được cập nhật thành công!</div>");
             if (onFinished) onFinished(true);
         } else {
