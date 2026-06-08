@@ -20,8 +20,10 @@
 #include <QRegularExpression>
 #include <QFile>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QTemporaryDir>
 #include <QFileInfo>
+#include <QCoreApplication>
 #include <cmath>
 
 
@@ -42,6 +44,110 @@ static bool readDarkModeSetting()
 
     QSettings appDirSettings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
     return appDirSettings.value("dark_mode", false).toBool();
+}
+
+// =======================================================================
+// [FIX TECTONIC CROSS-PLATFORM]
+// Tìm trình biên dịch LaTeX theo đúng cấu trúc đóng gói trong file YAML:
+// - Windows:  <app>/tools/tectonic.exe
+// - Linux:    <app>/tools/tectonic hoặc <AppImage>/usr/bin/tools/tectonic
+// - macOS:    <app>.app/Contents/Resources/tools/tectonic
+// Nếu không có Tectonic đi kèm thì fallback sang PATH hệ thống.
+// =======================================================================
+static bool ensureExecutablePermission(const QString& filePath)
+{
+    QFileInfo info(filePath);
+    if (!info.exists() || !info.isFile()) {
+        return false;
+    }
+
+#ifndef Q_OS_WIN
+    QFile::Permissions permissions = QFile::permissions(filePath);
+    permissions |= QFileDevice::ExeOwner | QFileDevice::ExeUser |
+                   QFileDevice::ExeGroup | QFileDevice::ExeOther |
+                   QFileDevice::ReadOwner | QFileDevice::ReadUser |
+                   QFileDevice::ReadGroup | QFileDevice::ReadOther;
+    QFile::setPermissions(filePath, permissions);
+#endif
+
+    return true;
+}
+
+static QString findLatexCompilerForPackagedApp(bool* useTectonic)
+{
+    if (useTectonic) {
+        *useTectonic = false;
+    }
+
+#ifdef Q_OS_WIN
+    const QString tectonicName = "tectonic.exe";
+    const QString xelatexName  = "xelatex.exe";
+#else
+    const QString tectonicName = "tectonic";
+    const QString xelatexName  = "xelatex";
+#endif
+
+    QStringList baseDirs;
+    const QString appDir = QCoreApplication::applicationDirPath();
+    baseDirs << appDir;
+
+    // AppImage thường có biến APPDIR. Wrapper trong YAML cũng đặt tool ở usr/bin/tools.
+    const QString appImageDir = QString::fromLocal8Bit(qgetenv("APPDIR"));
+    if (!appImageDir.isEmpty()) {
+        baseDirs << appImageDir
+                 << QDir(appImageDir).filePath("usr/bin")
+                 << QDir(appImageDir).filePath("usr");
+    }
+
+#ifdef Q_OS_MAC
+    // Khi chạy trong .app: applicationDirPath() = Contents/MacOS
+    baseDirs << QDir(appDir).filePath("../Resources")
+             << QDir(appDir).filePath("../Resources/tools");
+#endif
+
+    QStringList tectonicCandidates;
+    for (const QString& base : baseDirs) {
+        tectonicCandidates
+            << QDir::cleanPath(QDir(base).filePath("tools/" + tectonicName))
+            << QDir::cleanPath(QDir(base).filePath(tectonicName));
+    }
+
+#ifdef Q_OS_LINUX
+    // Đúng với AppDir trong YAML: AppDir/usr/bin/tools/tectonic
+    tectonicCandidates
+        << QDir::cleanPath(QDir(appDir).filePath("tools/" + tectonicName))
+        << QDir::cleanPath(QDir(appDir).filePath("../bin/tools/" + tectonicName))
+        << QDir::cleanPath(QDir(appDir).filePath("../usr/bin/tools/" + tectonicName));
+#endif
+
+    // Ưu tiên Tectonic đóng gói kèm app trước để chạy ổn định trên máy người dùng.
+    for (const QString& candidate : tectonicCandidates) {
+        if (ensureExecutablePermission(candidate)) {
+            if (useTectonic) {
+                *useTectonic = true;
+            }
+            return candidate;
+        }
+    }
+
+    QString tectonicFromPath = QStandardPaths::findExecutable(tectonicName);
+    if (!tectonicFromPath.isEmpty()) {
+        if (useTectonic) {
+            *useTectonic = true;
+        }
+        return tectonicFromPath;
+    }
+
+    // Chỉ fallback sang xelatex nếu máy người dùng đã cài TeX Live/MiKTeX/MacTeX.
+    QString xelatexFromPath = QStandardPaths::findExecutable(xelatexName);
+    if (!xelatexFromPath.isEmpty()) {
+        if (useTectonic) {
+            *useTectonic = false;
+        }
+        return xelatexFromPath;
+    }
+
+    return "";
 }
 
 WdSolve::WdSolve(QWidget *parent)
@@ -827,25 +933,18 @@ WdSolve::WdSolve(QWidget *parent)
             QString fileName = QFileDialog::getSaveFileName(previewDialog, "Lưu file PDF", "BaoCao_QHTT.pdf", "PDF Files (*.pdf)");
             if (fileName.isEmpty()) return;
 
-            // [FIX PDF EXPORT]
-            // Cấu trúc bảng từ vựng có nhiều cột căn chỉnh toán học.
-            // QTextDocument + QPdfWriter không render ổn định kiểu bảng này nên dễ bị mất cột/tràn dòng.
-            // Vì vậy khi tải PDF, biên dịch trực tiếp chuỗi LaTeX (.tex) sang PDF bằng xelatex/tectonic.
-            QString compilerPath = QStandardPaths::findExecutable("xelatex");
+            // [FIX PDF EXPORT CROSS-PLATFORM]
+            // File YAML đã đóng gói Tectonic trong thư mục tools/ của từng hệ điều hành.
+            // Vì vậy ưu tiên tìm Tectonic đi kèm app trước, sau đó mới fallback sang PATH hệ thống.
             bool useTectonic = false;
-
-            if (compilerPath.isEmpty()) {
-                compilerPath = QStandardPaths::findExecutable("tectonic");
-                useTectonic = !compilerPath.isEmpty();
-            }
+            QString compilerPath = findLatexCompilerForPackagedApp(&useTectonic);
 
             if (compilerPath.isEmpty()) {
                 QMessageBox::warning(
                     previewDialog,
                     "Thiếu trình biên dịch LaTeX",
-                    "Không tìm thấy xelatex hoặc tectonic trên máy.\n\n"
-                    "Để xuất PDF với cấu trúc công thức căn chỉnh đẹp và không bị lỗi, "
-                    "vui lòng cài TeX Live/MiKTeX hoặc Tectonic.\n\n"
+                    "Không tìm thấy Tectonic đi kèm phần mềm hoặc xelatex trên máy.\n\n"
+                    "Vui lòng kiểm tra lại gói cài đặt: thư mục tools phải có tectonic tương ứng với hệ điều hành.\n"
                     "Bạn vẫn có thể bấm 'Tải xuống .tex' để lưu file LaTeX và biên dịch thủ công."
                     );
                 return;
@@ -871,6 +970,17 @@ WdSolve::WdSolve(QWidget *parent)
 
             QProcess process;
             process.setWorkingDirectory(tempDir.path());
+
+            // Đưa thư mục chứa compiler vào PATH để Tectonic đi kèm app hoạt động ổn định hơn.
+            QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+            QString compilerDir = QFileInfo(compilerPath).absolutePath();
+            QString oldPath = env.value("PATH");
+#ifdef Q_OS_WIN
+            env.insert("PATH", compilerDir + ";" + oldPath);
+#else
+            env.insert("PATH", compilerDir + ":" + oldPath);
+#endif
+            process.setProcessEnvironment(env);
 
             QStringList args;
             if (useTectonic) {
