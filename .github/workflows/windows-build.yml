@@ -182,20 +182,16 @@ jobs:
 
         $warmup = @'
         \documentclass[12pt,a4paper]{article}
-        \usepackage{fontspec}
+        \usepackage[utf8]{inputenc}
+        \usepackage[T5]{fontenc}
         \usepackage[vietnamese]{babel}
         \usepackage{amsmath, geometry, array, amssymb, xcolor}
-        \IfFontExistsTF{TeX Gyre Termes}
-          {\setmainfont{TeX Gyre Termes}}
-          {\IfFontExistsTF{Times New Roman}
-             {\setmainfont{Times New Roman}}
-             {\setmainfont{Latin Modern Roman}}}
         \geometry{margin=1in}
         \sloppy
         \emergencystretch=2em
         \begin{document}
-        \section*{Kiem tra tieng Viet}
-        Giai bai toan quy hoach tuyen tinh.
+        \section*{Kiem tra cache LaTeX}
+        Kiem tra bien dich bao cao quy hoach tuyen tinh.
         \[
         \begin{array}{r c r c r l}
         -Z &=& 0.00 &+& x_{1}\\
@@ -203,7 +199,7 @@ jobs:
         w_{1} &=& 1.00 &-& x_{1}
         \end{array}
         \]
-        \textcolor{red}{w_1} \quad \textcolor{green!50!black}{x_1}
+        \textcolor{red}{$w_1$} \quad \textcolor{green!50!black}{$x_1$}
         \end{document}
         '@
 
@@ -416,20 +412,16 @@ jobs:
 
         cat > tectonic-warmup.tex <<'EOF'
         \documentclass[12pt,a4paper]{article}
-        \usepackage{fontspec}
+        \usepackage[utf8]{inputenc}
+        \usepackage[T5]{fontenc}
         \usepackage[vietnamese]{babel}
         \usepackage{amsmath, geometry, array, amssymb, xcolor}
-        \IfFontExistsTF{TeX Gyre Termes}
-          {\setmainfont{TeX Gyre Termes}}
-          {\IfFontExistsTF{Times New Roman}
-             {\setmainfont{Times New Roman}}
-             {\setmainfont{Latin Modern Roman}}}
         \geometry{margin=1in}
         \sloppy
         \emergencystretch=2em
         \begin{document}
-        \section*{Kiem tra tieng Viet}
-        Giai bai toan quy hoach tuyen tinh.
+        \section*{Kiem tra cache LaTeX}
+        Kiem tra bien dich bao cao quy hoach tuyen tinh.
         \[
         \begin{array}{r c r c r l}
         -Z &=& 0.00 &+& x_{1}\\
@@ -437,7 +429,7 @@ jobs:
         w_{1} &=& 1.00 &-& x_{1}
         \end{array}
         \]
-        \textcolor{red}{w_1} \quad \textcolor{green!50!black}{x_1}
+        \textcolor{red}{$w_1$} \quad \textcolor{green!50!black}{$x_1$}
         \end{document}
         EOF
 
@@ -699,20 +691,16 @@ jobs:
         mkdir -p "$SEED_CACHE"
         cat > tectonic-warmup.tex <<'EOF'
         \documentclass[12pt,a4paper]{article}
-        \usepackage{fontspec}
+        \usepackage[utf8]{inputenc}
+        \usepackage[T5]{fontenc}
         \usepackage[vietnamese]{babel}
         \usepackage{amsmath, geometry, array, amssymb, xcolor}
-        \IfFontExistsTF{TeX Gyre Termes}
-          {\setmainfont{TeX Gyre Termes}}
-          {\IfFontExistsTF{Times New Roman}
-             {\setmainfont{Times New Roman}}
-             {\setmainfont{Latin Modern Roman}}}
         \geometry{margin=1in}
         \sloppy
         \emergencystretch=2em
         \begin{document}
-        \section*{Kiem tra tieng Viet}
-        Giai bai toan quy hoach tuyen tinh.
+        \section*{Kiem tra cache LaTeX}
+        Kiem tra bien dich bao cao quy hoach tuyen tinh.
         \[
         \begin{array}{r c r c r l}
         -Z &=& 0.00 &+& x_{1}\\
@@ -720,7 +708,7 @@ jobs:
         w_{1} &=& 1.00 &-& x_{1}
         \end{array}
         \]
-        \textcolor{red}{w_1} \quad \textcolor{green!50!black}{x_1}
+        \textcolor{red}{$w_1$} \quad \textcolor{green!50!black}{$x_1$}
         \end{document}
         EOF
 
