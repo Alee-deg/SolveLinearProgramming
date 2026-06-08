@@ -96,10 +96,10 @@ static QString findBundledLatexCompiler(bool* useTectonic)
 #ifndef Q_OS_WIN
             QFile::setPermissions(fi.absoluteFilePath(),
                                   QFile::permissions(fi.absoluteFilePath()) |
-                                  QFileDevice::ExeOwner |
-                                  QFileDevice::ExeUser |
-                                  QFileDevice::ExeGroup |
-                                  QFileDevice::ExeOther);
+                                      QFileDevice::ExeOwner |
+                                      QFileDevice::ExeUser |
+                                      QFileDevice::ExeGroup |
+                                      QFileDevice::ExeOther);
 #endif
             if (useTectonic) *useTectonic = true;
             return fi.absoluteFilePath();
@@ -844,8 +844,8 @@ WdSolve::WdSolve(QWidget *parent)
         Q_UNUSED(bundledFontDir);
         tex += "\\IfFontExistsTF{Times New Roman}{\\setmainfont{Times New Roman}}{\n";
         tex += "\\IfFontExistsTF{Arial}{\\setmainfont{Arial}}{\\setmainfont{Latin Modern Roman}}}\n";
-#else
-        // Linux/macOS vẫn ưu tiên Noto Serif đóng gói kèm app để PDF tiếng Việt ổn định.
+#else \
+    // Linux/macOS vẫn ưu tiên Noto Serif đóng gói kèm app để PDF tiếng Việt ổn định.
         if (!bundledFontDir.isEmpty()) {
             tex += "\\setmainfont{NotoSerif}[\n";
             tex += "  Path={" + bundledFontDir + "},\n";
@@ -1285,12 +1285,12 @@ WdSolve::WdSolve(QWidget *parent)
 
             *cancelConnection = QObject::connect(progress, &QProgressDialog::canceled, previewDialog,
                                                  [process, userCanceled, processFinished]() {
-                if (*processFinished) return;
-                *userCanceled = true;
-                if (process->state() != QProcess::NotRunning) {
-                    process->kill();
-                }
-            });
+                                                     if (*processFinished) return;
+                                                     *userCanceled = true;
+                                                     if (process->state() != QProcess::NotRunning) {
+                                                         process->kill();
+                                                     }
+                                                 });
 
             QTimer* timeoutTimer = new QTimer(process);
             timeoutTimer->setSingleShot(true);
@@ -1305,89 +1305,89 @@ WdSolve::WdSolve(QWidget *parent)
             QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
                              previewDialog,
                              [=](int exitCode, QProcess::ExitStatus exitStatus) {
-                *processFinished = true;
-                if (timeoutTimer) timeoutTimer->stop();
+                                 *processFinished = true;
+                                 if (timeoutTimer) timeoutTimer->stop();
 
-                // Ngắt tín hiệu canceled() trước khi đóng progress để tránh QProgressDialog
-                // tự phát canceled() và làm app báo nhầm "Đã hủy" trên Windows/Linux/macOS.
-                if (cancelConnection) QObject::disconnect(*cancelConnection);
-                if (progress) {
-                    progress->hide();
-                    progress->deleteLater();
-                }
+                                 // Ngắt tín hiệu canceled() trước khi đóng progress để tránh QProgressDialog
+                                 // tự phát canceled() và làm app báo nhầm "Đã hủy" trên Windows/Linux/macOS.
+                                 if (cancelConnection) QObject::disconnect(*cancelConnection);
+                                 if (progress) {
+                                     progress->hide();
+                                     progress->deleteLater();
+                                 }
 
-                // Đọc nốt phần log còn lại để tránh mất lỗi thật.
-                *stdOutLog += QString::fromUtf8(process->readAllStandardOutput());
-                *stdErrLog += QString::fromUtf8(process->readAllStandardError());
+                                 // Đọc nốt phần log còn lại để tránh mất lỗi thật.
+                                 *stdOutLog += QString::fromUtf8(process->readAllStandardOutput());
+                                 *stdErrLog += QString::fromUtf8(process->readAllStandardError());
 
-                QString pdfTempPath = findLatexPdfOutput(tempDir->path());
-                bool success = (exitStatus == QProcess::NormalExit &&
-                                QFileInfo::exists(pdfTempPath) &&
-                                QFileInfo(pdfTempPath).size() > 0);
+                                 QString pdfTempPath = findLatexPdfOutput(tempDir->path());
+                                 bool success = (exitStatus == QProcess::NormalExit &&
+                                                 QFileInfo::exists(pdfTempPath) &&
+                                                 QFileInfo(pdfTempPath).size() > 0);
 
-                if (*userCanceled) {
-                    QMessageBox::information(previewDialog, "Đã hủy", "Quá trình biên dịch PDF đã bị hủy bởi người dùng.");
-                } else if (*timedOut) {
-                    bool fallbackOk = exportHtmlPdfFallback(fileName, html);
-                    QString log = compactLatexLog(*stdErrLog + "\n" + *stdOutLog);
+                                 if (*userCanceled) {
+                                     QMessageBox::information(previewDialog, "Đã hủy", "Quá trình biên dịch PDF đã bị hủy bởi người dùng.");
+                                 } else if (*timedOut) {
+                                     bool fallbackOk = exportHtmlPdfFallback(fileName, html);
+                                     QString log = compactLatexLog(*stdErrLog + "\n" + *stdOutLog);
 
-                    if (fallbackOk) {
-                        QMessageBox::warning(
-                            previewDialog,
-                            "Biên dịch LaTeX quá lâu",
-                            "Tectonic/XeLaTeX chạy quá thời gian cho phép nên đã được dừng lại.\n\n"
-                            "Phần mềm đã tự động lưu PDF bằng chế độ tương thích Qt để tránh treo ứng dụng.\n\n"
-                            "Log rút gọn:\n" + log
-                            );
-                    } else {
-                        QMessageBox::critical(
-                            previewDialog,
-                            "Lỗi biên dịch LaTeX",
-                            "Tectonic/XeLaTeX chạy quá thời gian cho phép và cũng không thể xuất bằng chế độ Qt.\n\n"
-                            "Log rút gọn:\n" + log
-                            );
-                    }
-                } else if (success) {
-                    if (QFileInfo::exists(fileName)) QFile::remove(fileName);
+                                     if (fallbackOk) {
+                                         QMessageBox::warning(
+                                             previewDialog,
+                                             "Biên dịch LaTeX quá lâu",
+                                             "Tectonic/XeLaTeX chạy quá thời gian cho phép nên đã được dừng lại.\n\n"
+                                             "Phần mềm đã tự động lưu PDF bằng chế độ tương thích Qt để tránh treo ứng dụng.\n\n"
+                                             "Log rút gọn:\n" + log
+                                             );
+                                     } else {
+                                         QMessageBox::critical(
+                                             previewDialog,
+                                             "Lỗi biên dịch LaTeX",
+                                             "Tectonic/XeLaTeX chạy quá thời gian cho phép và cũng không thể xuất bằng chế độ Qt.\n\n"
+                                             "Log rút gọn:\n" + log
+                                             );
+                                     }
+                                 } else if (success) {
+                                     if (QFileInfo::exists(fileName)) QFile::remove(fileName);
 
-                    if (QFile::copy(pdfTempPath, fileName)) {
-                        QMessageBox::information(previewDialog, "Thành công", "Đã biên dịch và lưu thành công file PDF từ LaTeX!");
-                    } else {
-                        QMessageBox::critical(previewDialog, "Lỗi", "Không thể lưu file PDF vào vị trí đã chọn.");
-                    }
-                } else {
-                    // Nếu LaTeX/Tectonic lỗi do tải gói, thiếu mạng, thiếu font..., vẫn không để người dùng thất bại hoàn toàn.
-                    bool fallbackOk = exportHtmlPdfFallback(fileName, html);
-                    QString log = compactLatexLog(*stdErrLog + "\n" + *stdOutLog);
+                                     if (QFile::copy(pdfTempPath, fileName)) {
+                                         QMessageBox::information(previewDialog, "Thành công", "Đã biên dịch và lưu thành công file PDF từ LaTeX!");
+                                     } else {
+                                         QMessageBox::critical(previewDialog, "Lỗi", "Không thể lưu file PDF vào vị trí đã chọn.");
+                                     }
+                                 } else {
+                                     // Nếu LaTeX/Tectonic lỗi do tải gói, thiếu mạng, thiếu font..., vẫn không để người dùng thất bại hoàn toàn.
+                                     bool fallbackOk = exportHtmlPdfFallback(fileName, html);
+                                     QString log = compactLatexLog(*stdErrLog + "\n" + *stdOutLog);
 
-                    if (fallbackOk) {
-                        QMessageBox::warning(
-                            previewDialog,
-                            "Biên dịch LaTeX không thành công",
-                            "Tectonic/XeLaTeX chưa tạo được PDF LaTeX.\n"
-                            "Nguyên nhân thường gặp trên Windows/Linux là lần đầu Tectonic cần tải bundle hoặc thiếu mạng.\n\n"
-                            "Phần mềm đã tự động lưu PDF bằng chế độ tương thích Qt để tránh lỗi.\n\n"
-                            "Log rút gọn:\n" + log
-                            );
-                    } else {
-                        QMessageBox::critical(
-                            previewDialog,
-                            "Lỗi biên dịch LaTeX",
-                            "Không thể biên dịch file .tex thành PDF và cũng không thể xuất bằng chế độ Qt.\n\n"
-                            "Log rút gọn:\n" + log
-                            );
-                    }
-                }
+                                     if (fallbackOk) {
+                                         QMessageBox::warning(
+                                             previewDialog,
+                                             "Biên dịch LaTeX không thành công",
+                                             "Tectonic/XeLaTeX chưa tạo được PDF LaTeX.\n"
+                                             "Nguyên nhân thường gặp trên Windows/Linux là lần đầu Tectonic cần tải bundle hoặc thiếu mạng.\n\n"
+                                             "Phần mềm đã tự động lưu PDF bằng chế độ tương thích Qt để tránh lỗi.\n\n"
+                                             "Log rút gọn:\n" + log
+                                             );
+                                     } else {
+                                         QMessageBox::critical(
+                                             previewDialog,
+                                             "Lỗi biên dịch LaTeX",
+                                             "Không thể biên dịch file .tex thành PDF và cũng không thể xuất bằng chế độ Qt.\n\n"
+                                             "Log rút gọn:\n" + log
+                                             );
+                                     }
+                                 }
 
-                delete stdOutLog;
-                delete stdErrLog;
-                delete userCanceled;
-                delete processFinished;
-                delete timedOut;
-                delete cancelConnection;
-                delete tempDir;
-                process->deleteLater();
-            });
+                                 delete stdOutLog;
+                                 delete stdErrLog;
+                                 delete userCanceled;
+                                 delete processFinished;
+                                 delete timedOut;
+                                 delete cancelConnection;
+                                 delete tempDir;
+                                 process->deleteLater();
+                             });
 
             process->start(compilerPath, args);
             if (!process->waitForStarted(3000)) {
@@ -1584,26 +1584,51 @@ void WdSolve::displayResults(const LinearProgram& lp,
             int setRow = origN;
             int noteRow = origN + 1;
 
+            // ===================================================================
+            // [FIX UI VÔ SỐ NGHIỆM - THIẾT KẾ CHUYÊN NGHIỆP HƠN]
+            // Không span toàn bộ 4 cột nữa vì nhìn giống một khối ghi chú thô.
+            // Chia thành 2 dòng dạng "nhãn + nội dung" để đồng bộ với bảng nghiệm.
+            // ===================================================================
+            const QColor labelBg(isDark ? "#1E3A5F" : "#E8F2FF");
+            const QColor contentBg(isDark ? "#263247" : "#F8FBFF");
+            const QColor noteBg(isDark ? "#2A2E3F" : "#F6F7F9");
+            const QColor noteLabelBg(isDark ? "#3A3148" : "#F1ECFF");
+
+            QTableWidgetItem *itemSetLabel = new QTableWidgetItem("Tập nghiệm");
+            itemSetLabel->setTextAlignment(Qt::AlignCenter);
+            itemSetLabel->setBackground(labelBg);
+            ui->table_solution->setItem(setRow, 0, itemSetLabel);
+
             QTableWidgetItem *itemSet = new QTableWidgetItem(
-                "Tập nghiệm tối ưu: X(λ) = λ" + firstPoint +
+                "X(λ) = λ" + firstPoint +
                 " + (1 - λ)" + secondPoint +
-                ", 0 ≤ λ ≤ 1. Các điểm này đều là nghiệm tối ưu."
-            );
+                ", 0 ≤ λ ≤ 1. Tất cả các điểm thuộc tập này đều là nghiệm tối ưu."
+                );
             itemSet->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-            itemSet->setBackground(QColor(isDark ? "#313244" : "#FFFBEA"));
-            ui->table_solution->setItem(setRow, 0, itemSet);
-            ui->table_solution->setSpan(setRow, 0, 1, colCount);
+            itemSet->setBackground(contentBg);
+            itemSet->setToolTip(itemSet->text());
+            ui->table_solution->setItem(setRow, 1, itemSet);
+            ui->table_solution->setSpan(setRow, 1, 1, colCount - 1);
+
+            QTableWidgetItem *itemNoteLabel = new QTableWidgetItem("Ghi chú");
+            itemNoteLabel->setTextAlignment(Qt::AlignCenter);
+            itemNoteLabel->setBackground(noteLabelBg);
+            ui->table_solution->setItem(noteRow, 0, itemNoteLabel);
 
             QTableWidgetItem *itemNote = new QTableWidgetItem(
-                "Nếu bài toán có nhiều hơn hai biến, tập nghiệm tối ưu tổng quát có thể là một mặt lồi của miền nghiệm khả thi, "
+                "Nếu bài toán có nhiều hơn hai biến, tập nghiệm tối ưu tổng quát có thể là một mặt lồi của miền nghiệm khả thi; "
                 "không nhất thiết chỉ là đoạn thẳng nối hai điểm trên."
-            );
+                );
             itemNote->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-            itemNote->setBackground(QColor(isDark ? "#313244" : "#F0F8FF"));
-            ui->table_solution->setItem(noteRow, 0, itemNote);
-            ui->table_solution->setSpan(noteRow, 0, 1, colCount);
+            itemNote->setBackground(noteBg);
+            itemNote->setToolTip(itemNote->text());
+            ui->table_solution->setItem(noteRow, 1, itemNote);
+            ui->table_solution->setSpan(noteRow, 1, 1, colCount - 1);
 
-            ui->table_solution->resizeRowsToContents();
+            ui->table_solution->setWordWrap(true);
+            ui->table_solution->setShowGrid(true);
+            ui->table_solution->setRowHeight(setRow, 44);
+            ui->table_solution->setRowHeight(noteRow, 52);
         }
     } else if (status.contains("giới nội", Qt::CaseInsensitive)) {
         if (originalLp.isMaximize) {
