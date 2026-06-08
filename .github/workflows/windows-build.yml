@@ -146,6 +146,19 @@ jobs:
         New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
         New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
 
+        # [FONT FIX] Đóng gói Noto Serif để PDF LaTeX hiển thị đúng tiếng Việt trên mọi máy.
+        $fontsDir = Join-Path $outDir "fonts"
+        $notoDir = "noto-fonts"
+        New-Item -ItemType Directory -Force -Path $fontsDir | Out-Null
+        New-Item -ItemType Directory -Force -Path $notoDir | Out-Null
+        foreach ($style in @("Regular","Bold","Italic","BoldItalic")) {
+          $url = "https://raw.githubusercontent.com/notofonts/noto-fonts/main/hinted/ttf/NotoSerif/NotoSerif-$style.ttf"
+          $target = Join-Path $notoDir "NotoSerif-$style.ttf"
+          Invoke-WebRequest -Uri $url -OutFile $target -Headers @{ "User-Agent" = "PhanMemQHTT-GitHub-Actions" }
+          Copy-Item $target (Join-Path $fontsDir "NotoSerif-$style.ttf") -Force
+        }
+        Write-Host "[OK] Bundled Noto Serif fonts: $fontsDir"
+
         $headers = @{
           "Accept" = "application/vnd.github+json"
           "User-Agent" = "PhanMemQHTT-GitHub-Actions"
@@ -182,10 +195,16 @@ jobs:
 
         $warmup = @'
         \documentclass[12pt,a4paper]{article}
-        \usepackage[utf8]{inputenc}
-        \usepackage[T5]{fontenc}
+        \usepackage{fontspec}
         \usepackage[vietnamese]{babel}
         \usepackage{amsmath, geometry, array, amssymb, xcolor}
+        \setmainfont{NotoSerif}[
+          Path={noto-fonts/},
+          UprightFont=*-Regular.ttf,
+          BoldFont=*-Bold.ttf,
+          ItalicFont=*-Italic.ttf,
+          BoldItalicFont=*-BoldItalic.ttf
+        ]
         \geometry{margin=1in}
         \sloppy
         \emergencystretch=2em
@@ -329,6 +348,15 @@ jobs:
         mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
         mkdir -p AppDir/usr/bin/tools
         mkdir -p AppDir/usr/share/tectonic-cache
+        mkdir -p AppDir/usr/share/fonts/phanmemqhtt
+        mkdir -p noto-fonts
+
+        # [FONT FIX] Đóng gói Noto Serif để PDF LaTeX hiển thị đúng tiếng Việt trên mọi máy.
+        for style in Regular Bold Italic BoldItalic; do
+          curl -L --retry 3 --fail             -o "noto-fonts/NotoSerif-${style}.ttf"             "https://raw.githubusercontent.com/notofonts/noto-fonts/main/hinted/ttf/NotoSerif/NotoSerif-${style}.ttf"
+          cp "noto-fonts/NotoSerif-${style}.ttf" "AppDir/usr/share/fonts/phanmemqhtt/NotoSerif-${style}.ttf"
+        done
+        echo "[OK] Bundled Noto Serif fonts into AppImage"
 
         cp -L /usr/lib/x86_64-linux-gnu/libssl.so* AppDir/usr/lib/ 2>/dev/null || true
         cp -L /usr/lib/x86_64-linux-gnu/libcrypto.so* AppDir/usr/lib/ 2>/dev/null || true
@@ -412,10 +440,16 @@ jobs:
 
         cat > tectonic-warmup.tex <<'EOF'
         \documentclass[12pt,a4paper]{article}
-        \usepackage[utf8]{inputenc}
-        \usepackage[T5]{fontenc}
+        \usepackage{fontspec}
         \usepackage[vietnamese]{babel}
         \usepackage{amsmath, geometry, array, amssymb, xcolor}
+        \setmainfont{NotoSerif}[
+          Path={noto-fonts/},
+          UprightFont=*-Regular.ttf,
+          BoldFont=*-Bold.ttf,
+          ItalicFont=*-Italic.ttf,
+          BoldItalicFont=*-BoldItalic.ttf
+        ]
         \geometry{margin=1in}
         \sloppy
         \emergencystretch=2em
@@ -591,6 +625,15 @@ jobs:
         TOOLS_DIR="$APP_BUNDLE/Contents/Resources/tools"
         export TOOLS_DIR
         mkdir -p "$TOOLS_DIR"
+        mkdir -p "$APP_BUNDLE/Contents/Resources/fonts"
+        mkdir -p noto-fonts
+
+        # [FONT FIX] Đóng gói Noto Serif để PDF LaTeX hiển thị đúng tiếng Việt trên mọi máy.
+        for style in Regular Bold Italic BoldItalic; do
+          curl -L --retry 3 --fail             -o "noto-fonts/NotoSerif-${style}.ttf"             "https://raw.githubusercontent.com/notofonts/noto-fonts/main/hinted/ttf/NotoSerif/NotoSerif-${style}.ttf"
+          cp "noto-fonts/NotoSerif-${style}.ttf" "$APP_BUNDLE/Contents/Resources/fonts/NotoSerif-${style}.ttf"
+        done
+        echo "[OK] Bundled Noto Serif fonts into macOS app"
 
         python3 <<'PY'
         import json, re, tarfile, urllib.request, pathlib, sys, shutil, os
@@ -691,10 +734,16 @@ jobs:
         mkdir -p "$SEED_CACHE"
         cat > tectonic-warmup.tex <<'EOF'
         \documentclass[12pt,a4paper]{article}
-        \usepackage[utf8]{inputenc}
-        \usepackage[T5]{fontenc}
+        \usepackage{fontspec}
         \usepackage[vietnamese]{babel}
         \usepackage{amsmath, geometry, array, amssymb, xcolor}
+        \setmainfont{NotoSerif}[
+          Path={noto-fonts/},
+          UprightFont=*-Regular.ttf,
+          BoldFont=*-Bold.ttf,
+          ItalicFont=*-Italic.ttf,
+          BoldItalicFont=*-BoldItalic.ttf
+        ]
         \geometry{margin=1in}
         \sloppy
         \emergencystretch=2em
