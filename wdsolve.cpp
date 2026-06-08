@@ -791,6 +791,14 @@ WdSolve::WdSolve(QWidget *parent)
 
         html += "<h3>3. KẾT LUẬN</h3>";
         html += "<p style='text-align: left; margin-bottom: 5px;'><b>Trạng thái:</b> " + reportStatus + "</p>";
+
+        // [FIX KHÔNG GIỚI NỘI] Báo cáo vẫn phải nêu giá trị tối ưu theo hướng vô hạn.
+        // Max: +∞, Min: -∞. Không in nghiệm tối ưu vì bài toán không có nghiệm tối ưu hữu hạn.
+        if (zText.contains("Không giới nội", Qt::CaseInsensitive)) {
+            QString unboundedValueHtml = currentOriginalLp.isMaximize ? "+&infin;" : "-&infin;";
+            html += "<p style='text-align: left; margin-bottom: 5px;'><b>Giá trị tối ưu:</b> Z<sup>*</sup> = " + unboundedValueHtml + "</p>";
+        }
+
         if (!zText.contains("Vô nghiệm", Qt::CaseInsensitive) && !zText.contains("Không giới nội", Qt::CaseInsensitive) && !zText.contains("Lỗi", Qt::CaseInsensitive)) {
             html += "<p style='text-align: left; margin-bottom: 5px;'><b>Giá trị tối ưu:</b> Z<sup>*</sup> = " + formatVal(z_opt) + "</p>";
 
@@ -844,7 +852,7 @@ WdSolve::WdSolve(QWidget *parent)
         Q_UNUSED(bundledFontDir);
         tex += "\\IfFontExistsTF{Times New Roman}{\\setmainfont{Times New Roman}}{\n";
         tex += "\\IfFontExistsTF{Arial}{\\setmainfont{Arial}}{\\setmainfont{Latin Modern Roman}}}\n";
-#else \
+#else
     // Linux/macOS vẫn ưu tiên Noto Serif đóng gói kèm app để PDF tiếng Việt ổn định.
         if (!bundledFontDir.isEmpty()) {
             tex += "\\setmainfont{NotoSerif}[\n";
@@ -958,10 +966,10 @@ WdSolve::WdSolve(QWidget *parent)
             QString texUnbounded;
             if (currentOriginalLp.isMaximize) {
                 texUnbounded = "\\noindent\\textit{\\textbf{* Giải thích không giới nội:} các hệ số đứng trước biến ứng với hệ số âm nhất ở hàm mục tiêu trong các phương trình ở hệ ràng buộc đều dương.}\\\\\n"
-                               "\\noindent\\textit{\\textbf{* Giải thích:} Hàm mục tiêu có thể tăng lên vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Max Z là $+\\infty$.}\\n\n";
+                               "\\noindent\\textit{\\textbf{* Giải thích:} Hàm mục tiêu có thể tăng lên vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Max Z là $+\\infty$.}\n\n";
             } else {
                 texUnbounded = "\\noindent\\textit{\\textbf{* Giải thích không giới nội:} các hệ số đứng trước biến ứng với hệ số âm nhất ở hàm mục tiêu trong các phương trình ở hệ ràng buộc đều dương.}\\\\\n"
-                               "\\noindent\\textit{\\textbf{* Giải thích:} Hàm mục tiêu có thể giảm xuống vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Min Z là $-\\infty$.}\\n\n";
+                               "\\noindent\\textit{\\textbf{* Giải thích:} Hàm mục tiêu có thể giảm xuống vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Min Z là $-\\infty$.}\n\n";
             }
 
             bool isLastStepTex = (stepIdx == currentHistory.size() - 1);
@@ -1093,6 +1101,13 @@ WdSolve::WdSolve(QWidget *parent)
 
         tex += "\\section*{3. Kết luận}\n";
         tex += "\\noindent\\textbf{Trạng thái:} " + reportStatus + "\\\\[0.2cm]\n";
+
+        // [FIX KHÔNG GIỚI NỘI] Ghi rõ giá trị tối ưu vô hạn trong file .tex/PDF LaTeX.
+        if (zText.contains("Không giới nội", Qt::CaseInsensitive)) {
+            QString unboundedValueTex = currentOriginalLp.isMaximize ? "+\\infty" : "-\\infty";
+            tex += "\\noindent\\textbf{Giá trị tối ưu:} $Z^* = " + unboundedValueTex + "$\\\\[0.2cm]\n";
+        }
+
         if (!zText.contains("Vô nghiệm", Qt::CaseInsensitive) && !zText.contains("Không giới nội", Qt::CaseInsensitive) && !zText.contains("Lỗi", Qt::CaseInsensitive)) {
             tex += "\\noindent\\textbf{Giá trị tối ưu:} $Z^* = " + formatVal(z_opt) + "$\\\\[0.2cm]\n";
 
