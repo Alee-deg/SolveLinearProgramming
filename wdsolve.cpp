@@ -798,10 +798,12 @@ WdSolve::WdSolve(QWidget *parent)
                 !firstPointHtml.isEmpty() && !secondPointHtml.isEmpty()) {
                 html += "<p style='text-align: left; margin-bottom: 5px;'><b>Nghiệm tối ưu thứ nhất:</b> " + varListHtml + " = " + firstPointHtml + "</p>";
                 html += "<p style='text-align: left; margin-bottom: 5px;'><b>Nghiệm tối ưu thứ hai:</b> " + varListHtml + " = " + secondPointHtml + "</p>";
-                html += "<p style='text-align: left; margin-bottom: 5px;'><b>Tập lồi chứa các điểm tối ưu:</b> "
+                html += "<p style='text-align: left; margin-bottom: 5px;'><b>Tập nghiệm tối ưu:</b> "
                         "{ X(&lambda;) = &lambda;" + firstPointHtml +
                         " + (1 - &lambda;)" + secondPointHtml +
                         " | 0 &le; &lambda; &le; 1 }</p>";
+                html += "<p style='text-align: left; margin-bottom: 5px;'><i>Các điểm thuộc tập trên đều là nghiệm tối ưu.</i></p>";
+                html += "<p style='text-align: left; margin-bottom: 5px;'><i>Nếu bài toán có nhiều hơn hai biến, tập nghiệm tối ưu tổng quát có thể là một mặt lồi của miền nghiệm khả thi, không nhất thiết chỉ là đoạn thẳng nối hai điểm trên.</i></p>";
             } else {
                 html += "<p style='text-align: left; margin-bottom: 5px;'><b>Nghiệm tối ưu:</b> " + varListHtml + " = " + optSolHtml + "</p>";
             }
@@ -1098,10 +1100,12 @@ WdSolve::WdSolve(QWidget *parent)
                 !firstPointTex.isEmpty() && !secondPointTex.isEmpty()) {
                 tex += "\\noindent\\textbf{Nghiệm tối ưu thứ nhất:} $" + varListTex + " = " + firstPointTex + "$\\\\[0.15cm]\n";
                 tex += "\\noindent\\textbf{Nghiệm tối ưu thứ hai:} $" + varListTex + " = " + secondPointTex + "$\\\\[0.15cm]\n";
-                tex += "\\noindent\\textbf{Tập lồi chứa các điểm tối ưu:} "
+                tex += "\\noindent\\textbf{Tập nghiệm tối ưu:} "
                        "$\\left\\{ X(\\lambda) = \\lambda " + firstPointTex +
                        " + (1-\\lambda) " + secondPointTex +
-                       " \\mid 0 \\le \\lambda \\le 1 \\right\\}$\n\n";
+                       " \\mid 0 \\le \\lambda \\le 1 \\right\\}$\\\\[0.15cm]\n";
+                tex += "\\noindent\\textit{Các điểm thuộc tập trên đều là nghiệm tối ưu.}\\\\[0.15cm]\n";
+                tex += "\\noindent\\textit{Nếu bài toán có nhiều hơn hai biến, tập nghiệm tối ưu tổng quát có thể là một mặt lồi của miền nghiệm khả thi, không nhất thiết chỉ là đoạn thẳng nối hai điểm trên.}\n\n";
             } else {
                 tex += "\\noindent\\textbf{Nghiệm tối ưu:} $" + varListTex + " = " + optSolTex + "$\n\n";
             }
@@ -1515,7 +1519,7 @@ void WdSolve::displayResults(const LinearProgram& lp,
         bool isInfinite = (status == "Vô số nghiệm");
         int colCount = isInfinite ? 4 : 2;
 
-        ui->table_solution->setRowCount(origN);
+        ui->table_solution->setRowCount(isInfinite ? origN + 2 : origN);
         ui->table_solution->setColumnCount(colCount);
 
         QStringList headers;
@@ -1554,6 +1558,52 @@ void WdSolve::displayResults(const LinearProgram& lp,
                 itemDelta->setBackground(QColor(isDark ? "#313244" : "#F0F8FF"));
                 ui->table_solution->setItem(i, 3, itemDelta);
             }
+        }
+
+        // ===================================================================
+        // [FIX VÔ SỐ NGHIỆM] Bổ sung tập nghiệm tối ưu ngay trong bảng nghiệm.
+        // Nếu phần mềm tìm được 2 đỉnh tối ưu, mọi tổ hợp lồi của 2 đỉnh này
+        // đều là nghiệm tối ưu. Với bài toán nhiều hơn 2 biến, tập nghiệm tối ưu
+        // tổng quát có thể là một mặt lồi của miền khả thi, không nhất thiết chỉ
+        // là đoạn thẳng nối 2 điểm đã tìm được.
+        // ===================================================================
+        if (isInfinite) {
+            auto makePointDisplay = [&](const std::vector<double>& point) -> QString {
+                QStringList values;
+                for (int i = 0; i < origN; ++i) {
+                    double v = (i < (int)point.size()) ? point[i] : 0.0;
+                    if (std::abs(v) < 1e-9) v = 0.0;
+                    values << QString::number(v, 'f', 4);
+                }
+                return "(" + values.join(", ") + ")";
+            };
+
+            QString firstPoint = makePointDisplay(solution);
+            QString secondPoint = makePointDisplay(altSolution);
+
+            int setRow = origN;
+            int noteRow = origN + 1;
+
+            QTableWidgetItem *itemSet = new QTableWidgetItem(
+                "Tập nghiệm tối ưu: X(λ) = λ" + firstPoint +
+                " + (1 - λ)" + secondPoint +
+                ", 0 ≤ λ ≤ 1. Các điểm này đều là nghiệm tối ưu."
+            );
+            itemSet->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+            itemSet->setBackground(QColor(isDark ? "#313244" : "#FFFBEA"));
+            ui->table_solution->setItem(setRow, 0, itemSet);
+            ui->table_solution->setSpan(setRow, 0, 1, colCount);
+
+            QTableWidgetItem *itemNote = new QTableWidgetItem(
+                "Nếu bài toán có nhiều hơn hai biến, tập nghiệm tối ưu tổng quát có thể là một mặt lồi của miền nghiệm khả thi, "
+                "không nhất thiết chỉ là đoạn thẳng nối hai điểm trên."
+            );
+            itemNote->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+            itemNote->setBackground(QColor(isDark ? "#313244" : "#F0F8FF"));
+            ui->table_solution->setItem(noteRow, 0, itemNote);
+            ui->table_solution->setSpan(noteRow, 0, 1, colCount);
+
+            ui->table_solution->resizeRowsToContents();
         }
     } else if (status.contains("giới nội", Qt::CaseInsensitive)) {
         if (originalLp.isMaximize) {
