@@ -29,6 +29,7 @@
 #include <QTimer>
 #include <QProgressDialog>
 #include <cmath>
+#include <algorithm>
 
 
 // =======================================================================
@@ -595,10 +596,10 @@ WdSolve::WdSolve(QWidget *parent)
 
             QString pdfUnboundedHtml;
             if (currentOriginalLp.isMaximize) {
-                pdfUnboundedHtml = "<b>* Giải thích không giới nội:</b> các hệ số đứng trước biến ứng với hệ số âm nhất ở hàm mục tiêu trong các phương trình ở hệ ràng buộc đều dương.<br>"
+                pdfUnboundedHtml = "<b>* Giải thích không giới nội:</b> tồn tại một biến không cơ sở làm cải thiện hàm mục tiêu, đồng thời các hệ số của biến đó trong các phương trình ràng buộc không làm phá vỡ tính khả thi.<br>"
                                    "<b>* Giải thích:</b> Hàm mục tiêu có thể tăng lên vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Max Z là <b>+&infin;</b>.";
             } else {
-                pdfUnboundedHtml = "<b>* Giải thích không giới nội:</b> các hệ số đứng trước biến ứng với hệ số âm nhất ở hàm mục tiêu trong các phương trình ở hệ ràng buộc đều dương.<br>"
+                pdfUnboundedHtml = "<b>* Giải thích không giới nội:</b> tồn tại một biến không cơ sở làm cải thiện hàm mục tiêu, đồng thời các hệ số của biến đó trong các phương trình ràng buộc không làm phá vỡ tính khả thi.<br>"
                                    "<b>* Giải thích:</b> Hàm mục tiêu có thể giảm xuống vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Min Z là <b>-&infin;</b>.";
             }
 
@@ -842,6 +843,10 @@ WdSolve::WdSolve(QWidget *parent)
         tex += "\\usepackage{fontspec}\n";
         tex += "\\usepackage[vietnamese]{babel}\n";
         tex += "\\usepackage{amsmath, geometry, array, amssymb, xcolor}\n";
+        tex += "\\usepackage{graphicx}\n";
+        tex += "\\usepackage{adjustbox}\n";
+        tex += "\\usepackage{fancyhdr}\n";
+        tex += "\\usepackage{needspace}\n";
 
 #if defined(Q_OS_WIN) || defined(Q_OS_WINDOWS) || defined(_WIN32)
         // [FIX WINDOWS FONT]
@@ -853,7 +858,7 @@ WdSolve::WdSolve(QWidget *parent)
         tex += "\\IfFontExistsTF{Times New Roman}{\\setmainfont{Times New Roman}}{\n";
         tex += "\\IfFontExistsTF{Arial}{\\setmainfont{Arial}}{\\setmainfont{Latin Modern Roman}}}\n";
 #else
-    // Linux/macOS vẫn ưu tiên Noto Serif đóng gói kèm app để PDF tiếng Việt ổn định.
+        // Linux/macOS vẫn ưu tiên Noto Serif đóng gói kèm app để PDF tiếng Việt ổn định.
         if (!bundledFontDir.isEmpty()) {
             tex += "\\setmainfont{NotoSerif}[\n";
             tex += "  Path={" + bundledFontDir + "},\n";
@@ -868,14 +873,44 @@ WdSolve::WdSolve(QWidget *parent)
             tex += "\\IfFontExistsTF{Times New Roman}{\\setmainfont{Times New Roman}}{\\setmainfont{Latin Modern Roman}}}}\n";
         }
 #endif
-        tex += "\\geometry{margin=1in}\n";
+        // [FIX REPORT PDF - TRÌNH BÀY CHUYÊN NGHIỆP] \
+        // Cấu hình trang theo kiểu báo cáo khoa học: lề rõ, header/footer, \
+        // tiêu đề mục có đường kẻ, tiêu đề từng từ vựng có khung nhẹ.
+        tex += "\\geometry{left=22mm,right=22mm,top=20mm,bottom=22mm,headheight=15pt,headsep=7mm,footskip=10mm}\n";
+        tex += "\\definecolor{ReportBlue}{HTML}{1F4E79}\n";
+        tex += "\\definecolor{ReportGray}{HTML}{F4F7FB}\n";
+        tex += "\\definecolor{ReportRule}{HTML}{AAB7C4}\n";
+        tex += "\\definecolor{ReportRed}{HTML}{C0392B}\n";
+        tex += "\\definecolor{ReportGreen}{HTML}{1E8449}\n";
+        tex += "\\setlength{\\parindent}{0pt}\n";
+        tex += "\\setlength{\\parskip}{4pt}\n";
+        tex += "\\setlength{\\arraycolsep}{2.2pt}\n";
+        tex += "\\renewcommand{\\arraystretch}{1.15}\n";
+        tex += "\\pagestyle{fancy}\n";
+        tex += "\\fancyhf{}\n";
+        tex += "\\lhead{\\small Báo cáo Quy hoạch tuyến tính}\n";
+        tex += "\\rhead{\\small Phần mềm QHTT}\n";
+        tex += "\\cfoot{\\small Trang \\thepage}\n";
+        tex += "\\renewcommand{\\headrulewidth}{0.4pt}\n";
+        tex += "\\renewcommand{\\footrulewidth}{0pt}\n";
+        tex += "\\newcommand{\\ReportSection}[1]{\\Needspace{8\\baselineskip}\\vspace{0.25cm}\\noindent{\\Large\\bfseries\\textcolor{ReportBlue}{#1}}\\par\\vspace{0.05cm}\\noindent\\textcolor{ReportRule}{\\rule{\\textwidth}{0.7pt}}\\vspace{0.12cm}}\n";
+        tex += "\\newcommand{\\ReportStep}[1]{\\Needspace{7\\baselineskip}\\vspace{0.18cm}\\noindent\\fcolorbox{ReportBlue}{ReportGray}{\\parbox{0.965\\textwidth}{\\textbf{#1}}}\\vspace{0.12cm}}\n";
+        tex += "\\newcommand{\\ReportLabel}[1]{\\vspace{0.08cm}\\noindent\\textbf{#1}\\par\\vspace{0.04cm}}\n";
         tex += "\\sloppy\n";
-        tex += "\\emergencystretch=2em\n";
+        tex += "\\emergencystretch=3em\n";
         tex += "\\begin{document}\n\n";
-        tex += "\\begin{center}\n\\Large\\textbf{GIẢI BÀI TOÁN QUY HOẠCH TUYẾN TÍNH}\n\\end{center}\n\\vspace{0.5cm}\n\n";
+        tex += "\\begin{center}\n";
+        tex += "{\\Huge\\bfseries\\textcolor{ReportBlue}{GIẢI BÀI TOÁN QUY HOẠCH TUYẾN TÍNH}}\\par\n";
+        tex += "\\vspace{0.15cm}\n";
+        tex += "\\textcolor{ReportRule}{\\rule{0.78\\textwidth}{0.8pt}}\\par\n";
+        tex += "\\vspace{0.12cm}\n";
+        tex += "{\\large Báo cáo kết quả tính toán}\\par\n";
+        tex += "{\\small Ngày xuất báo cáo: \\today}\\par\n";
+        tex += "\\end{center}\n";
+        tex += "\\vspace{0.35cm}\n\n";
 
-        tex += "\\section*{1. Phát biểu bài toán}\n";
-        tex += "\\noindent\\textbf{Hàm mục tiêu:}\n";
+        tex += "\\ReportSection{1. Phát biểu bài toán}\n";
+        tex += "\\ReportLabel{Hàm mục tiêu:}\n";
         tex += "\\begin{center}\n$ " + QString(currentOriginalLp.isMaximize ? "\\text{Max } Z = " : "\\text{Min } Z = ");
         bool isFirstTexObj = true;
         if (std::abs(currentOriginalLp.c_0) > 1e-9) { tex += formatVal(currentOriginalLp.c_0); isFirstTexObj = false; }
@@ -894,52 +929,265 @@ WdSolve::WdSolve(QWidget *parent)
 
         tex += "\\noindent\\textbf{Hệ ràng buộc (Bao gồm ràng buộc dấu):}\n";
 
-        QString colsFormat = "";
-        for (size_t j = 0; j < currentOriginalLp.c.size(); ++j) colsFormat += "c r l ";
-        colsFormat += "c l";
+        // [FIX LATEX PDF - KHÔNG MẤT DỮ LIỆU]
+        // Không dùng một bảng array quá rộng cho toàn bộ hệ ràng buộc nữa.
+        // Mỗi ràng buộc được tự ngắt thành nhiều dòng, nên dù bài toán có nhiều biến
+        // thì nội dung vẫn nằm trong trang PDF, không bị cắt mất bên phải.
+        struct ReportTermTex {
+            QString sign;
+            QString coeff;
+            QString var;
+        };
 
-        tex += "\\begin{center}\n\\[ \\begin{array}{" + colsFormat + "}\n";
+        auto buildReportTermsTex = [&](const std::vector<double>& coeffs) -> std::vector<ReportTermTex> {
+            std::vector<ReportTermTex> terms;
+            for (size_t j = 0; j < coeffs.size(); ++j) {
+                double val = coeffs[j];
+                if (std::abs(val) < 1e-9) continue;
+
+                ReportTermTex term;
+                term.sign = (val >= 0) ? "+" : "-";
+                bool isOne = (std::abs(std::abs(val) - 1.0) < 1e-9);
+                term.coeff = isOne ? "" : formatCoeff(val);
+                term.var = "x_{" + QString::number(j + 1) + "}";
+                terms.push_back(term);
+            }
+            return terms;
+        };
+
+        auto appendWrappedConstraintTex = [&](const std::vector<double>& coeffs, const QString& sign, double rhs) {
+            std::vector<ReportTermTex> terms = buildReportTermsTex(coeffs);
+            const int maxTermsPerLine = 4;
+            QString rel = sign;
+            if (rel == "<=") rel = "\\le";
+            else if (rel == ">=") rel = "\\ge";
+
+            tex += "\\[\\begin{aligned}\n";
+
+            if (terms.empty()) {
+                tex += "& 0.00 " + rel + " " + formatVal(rhs) + " \\\\\n";
+            } else {
+                for (int start = 0; start < (int)terms.size(); start += maxTermsPerLine) {
+                    int take = std::min(maxTermsPerLine, (int)terms.size() - start);
+                    tex += "& ";
+                    if (start > 0) tex += "\\quad ";
+
+                    for (int k = 0; k < take; ++k) {
+                        const ReportTermTex& term = terms[start + k];
+                        bool isFirstPrintedTerm = (start == 0 && k == 0);
+
+                        if (isFirstPrintedTerm) {
+                            if (term.sign == "-") tex += "- ";
+                        } else {
+                            tex += term.sign + " ";
+                        }
+
+                        if (!term.coeff.isEmpty()) tex += term.coeff + " ";
+                        tex += term.var + " ";
+                    }
+
+                    if (start + take >= (int)terms.size()) {
+                        tex += rel + " " + formatVal(rhs);
+                    }
+                    tex += " \\\\\n";
+                }
+            }
+
+            tex += "\\end{aligned}\\]\n";
+        };
 
         for (size_t i = 0; i < currentOriginalLp.A.size(); ++i) {
-            bool isFirstTerm = true;
-            for (size_t j = 0; j < currentOriginalLp.A[i].size(); ++j) {
-                double val = currentOriginalLp.A[i][j];
-                if (std::abs(val) < 1e-9) {
-                    tex += " & & & ";
-                } else {
-                    QString sign = (val > 0) ? (isFirstTerm ? "" : "+") : "-";
-                    bool isOne = (std::abs(std::abs(val) - 1.0) < 1e-9);
-                    QString coeffStr = isOne ? "" : formatCoeff(val);
-                    tex += sign + " & " + coeffStr + " & x_{" + QString::number(j + 1) + "} & ";
-                    isFirstTerm = false;
-                }
-            }
-            if (isFirstTerm) tex += " & 0.00 & & ";
-
-            QString s = currentOriginalLp.signs[i];
-            if (s == "<=") s = "\\le";
-            else if (s == ">=") s = "\\ge";
-            tex += s + " & " + formatVal(currentOriginalLp.b[i]) + " \\\\\n";
+            QString s = (i < currentOriginalLp.signs.size()) ? currentOriginalLp.signs[i] : "";
+            double rhs = (i < currentOriginalLp.b.size()) ? currentOriginalLp.b[i] : 0.0;
+            appendWrappedConstraintTex(currentOriginalLp.A[i], s, rhs);
         }
+
+        tex += "\\ReportLabel{Ràng buộc dấu của biến:}\n";
+        tex += "\\[\\begin{aligned}\n";
         for (size_t i = 0; i < currentOriginalLp.varBounds.size(); ++i) {
-            for (size_t j = 0; j < currentOriginalLp.c.size(); ++j) {
-                if (i == j) {
-                    tex += " & & x_{" + QString::number(j + 1) + "} & ";
-                } else {
-                    tex += " & & & ";
-                }
-            }
             if (currentOriginalLp.varBounds[i].isFree || currentOriginalLp.varBounds[i].sign == "free") {
-                tex += "\\multicolumn{2}{l}{\\in \\mathbb{R}} \\\\\n";
+                tex += "x_{" + QString::number(i + 1) + "} &\\in \\mathbb{R}";
             } else {
                 QString s = currentOriginalLp.varBounds[i].sign;
-                if (s == "<=") s = "\\le"; else if (s == ">=") s = "\\ge";
-                tex += s + " & " + formatVal(currentOriginalLp.varBounds[i].value) + " \\\\\n";
+                if (s == "<=") s = "\\le";
+                else if (s == ">=") s = "\\ge";
+                tex += "x_{" + QString::number(i + 1) + "} &" + s + " " + formatVal(currentOriginalLp.varBounds[i].value);
+            }
+
+            if (i + 1 < currentOriginalLp.varBounds.size()) {
+                tex += " \\\\\n";
+            } else {
+                tex += "\n";
             }
         }
-        tex += "\\end{array} \\]\n\\end{center}\n\n";
+        tex += "\\end{aligned}\\]\n\n";
 
-        tex += "\\section*{2. Các bước giải (Dạng từ vựng)}\n";
+
+
+        // ===================================================================
+        // [FIX PDF/TEX - CĂN CỘT TỪ VỰNG & KHÔNG MẤT THÔNG TIN]
+        // Thay vì in từng phương trình riêng lẻ, helper dưới đây in cả một
+        // bảng từ vựng theo từng block biến không cơ sở. Trong mỗi block:
+        // - Cột biến cơ sở, dấu '=', hằng số tự do được căn dọc.
+        // - Dấu +/- nằm trong cột riêng.
+        // - Hệ số nằm trong cột riêng.
+        // - Biến nằm trong cột riêng.
+        // - Số biến mỗi block được tính theo chiều rộng ước lượng để không tràn trang.
+        // ===================================================================
+        auto estimateTermWidthTex = [&](int varIdx) -> int {
+            QString rawVar = getVarNameTex(varIdx);
+            // Ước lượng tương đối độ rộng khi render LaTeX.
+            // Biến có chỉ số + / - thường dài hơn nên cần ít cột hơn mỗi dòng.
+            int width = 9 + rawVar.length();
+            if (rawVar.contains("^+")) width += 2;
+            if (rawVar.contains("^-")) width += 2;
+            if (rawVar.contains("w_{")) width += 1;
+            return width;
+        };
+
+        auto buildVariableChunksTex = [&](const std::vector<int>& vars) -> std::vector<std::vector<int>> {
+            std::vector<std::vector<int>> chunks;
+            std::vector<int> currentChunk;
+
+            const int maxEstimatedWidth = 60; // an toàn với A4, font 12pt, lề 22mm
+            const int hardMaxTerms = ((int)vars.size() >= 9) ? 3 : 4;
+
+            int currentWidth = 0;
+            for (int varIdx : vars) {
+                int termWidth = estimateTermWidthTex(varIdx);
+
+                if (!currentChunk.empty() &&
+                    (currentWidth + termWidth > maxEstimatedWidth ||
+                     (int)currentChunk.size() >= hardMaxTerms)) {
+                    chunks.push_back(currentChunk);
+                    currentChunk.clear();
+                    currentWidth = 0;
+                }
+
+                currentChunk.push_back(varIdx);
+                currentWidth += termWidth;
+            }
+
+            if (!currentChunk.empty()) {
+                chunks.push_back(currentChunk);
+            }
+
+            // Trường hợp từ vựng chỉ có hằng số tự do, vẫn cần một block để in lhs = rhs.
+            if (chunks.empty()) {
+                chunks.push_back(std::vector<int>());
+            }
+
+            return chunks;
+        };
+
+        auto coeffInDictionaryTex = [&](const SimplexStep& step,
+                                        int rowIndex,
+                                        int varIndex,
+                                        int m,
+                                        bool isPhase1Loc,
+                                        size_t stepIdx) -> double {
+            bool isZRow = (rowIndex == m);
+            double coeff = isZRow ? step.matrix[m][varIndex] : -step.matrix[rowIndex][varIndex];
+
+            // Pha 1 bước khởi tạo: biến phụ x0 xuất hiện với hệ số 1 ở dòng mục tiêu phụ.
+            if (isZRow && stepIdx == 0 && isPhase1Loc &&
+                (varNames[varIndex] == "x_0" || varNames[varIndex] == "x0")) {
+                coeff = 1.0;
+            }
+
+            if (std::abs(coeff) < 1e-9) coeff = 0.0;
+            return coeff;
+        };
+
+        auto appendDictionaryBlockTex = [&](const SimplexStep& step,
+                                            const std::vector<int>& rowOrder,
+                                            const std::vector<int>& nonBasicVars,
+                                            int m,
+                                            int n,
+                                            bool isPhase1Loc,
+                                            size_t stepIdx) {
+            Q_UNUSED(n);
+
+            std::vector<std::vector<int>> chunks = buildVariableChunksTex(nonBasicVars);
+
+            for (size_t chunkIdx = 0; chunkIdx < chunks.size(); ++chunkIdx) {
+                const std::vector<int>& chunk = chunks[chunkIdx];
+                int slotCount = std::max(1, (int)chunk.size());
+
+                QString colSpec = "r@{\\;}c@{\\;}r";
+                for (int s = 0; s < slotCount; ++s) {
+                    colSpec += "@{\\quad}c@{\\;}r@{\\;}l";
+                }
+
+                tex += "\\begin{center}\n";
+                tex += "\\begin{adjustbox}{max width=\\textwidth}\n";
+                tex += "$\\begin{array}{" + colSpec + "}\n";
+
+                bool separatorPrinted = false;
+
+                for (size_t rr = 0; rr < rowOrder.size(); ++rr) {
+                    int rowIndex = rowOrder[rr];
+                    bool isZRow = (rowIndex == m);
+
+                    QString lhsVar = isZRow
+                                         ? (isPhase1Loc ? "\\xi" : (currentOriginalLp.isMaximize ? "-Z" : "Z"))
+                                         : getVarNameTex(step.currentBasicVars[rowIndex]);
+
+                    if (!isZRow && rowIndex == step.pivotRow) {
+                        lhsVar = colorTexVar(lhsVar, "ReportRed");
+                    }
+
+                    double rhsVal = isZRow ? -step.matrix[m][n] : step.matrix[rowIndex][n];
+                    if (std::abs(rhsVal) < 1e-9) rhsVal = 0.0;
+
+                    // Block đầu in đầy đủ lhs = rhs. Các block sau vẫn lặp lhs để người đọc
+                    // không bị mất ngữ cảnh khi phương trình dài phải chia block.
+                    tex += lhsVar + " & = & " + formatVal(rhsVal);
+
+                    for (int varIdx : chunk) {
+                        double coeff = coeffInDictionaryTex(step, rowIndex, varIdx, m, isPhase1Loc, stepIdx);
+
+                        if (std::abs(coeff) < 1e-9) {
+                            tex += " &  &  & ";
+                        } else {
+                            QString sign = (coeff >= 0) ? "+" : "-";
+                            bool isOne = (std::abs(std::abs(coeff) - 1.0) < 1e-9);
+                            QString coeffStr = isOne ? "" : formatCoeff(coeff);
+
+                            QString rhsVar = getVarNameTex(varIdx);
+                            if (varIdx == step.pivotCol) {
+                                rhsVar = colorTexVar(rhsVar, "ReportGreen");
+                            }
+
+                            tex += " & " + sign + " & " + coeffStr + " & " + rhsVar;
+                        }
+                    }
+
+                    // Nếu block rỗng hoặc thiếu slot, thêm ô rỗng để số cột luôn đúng.
+                    for (int pad = (int)chunk.size(); pad < slotCount; ++pad) {
+                        tex += " &  &  & ";
+                    }
+
+                    tex += " \\\\\n";
+
+                    // Kẻ dòng sau hàng mục tiêu trong mỗi block để tách rõ hàm mục tiêu và ràng buộc.
+                    if (isZRow && !separatorPrinted) {
+                        tex += "\\noalign{\\vskip 2pt}\\hline\\noalign{\\vskip 2pt}\n";
+                        separatorPrinted = true;
+                    }
+                }
+
+                tex += "\\end{array}$\n";
+                tex += "\\end{adjustbox}\n";
+                tex += "\\end{center}\n";
+
+                if (chunkIdx + 1 < chunks.size()) {
+                    tex += "\\vspace{-0.08cm}\n";
+                }
+            }
+        };
+
+        tex += "\\ReportSection{2. Các bước giải (dạng từ vựng)}\n";
         for (size_t stepIdx = 0; stepIdx < currentHistory.size(); ++stepIdx) {
             const SimplexStep& step = currentHistory[stepIdx];
             int m = step.matrix.size() - 1;
@@ -954,7 +1202,7 @@ WdSolve::WdSolve(QWidget *parent)
                 if (!isBasic) nonBasicVars.push_back(j);
             }
 
-            tex += "\\vspace{0.3cm}\n\\noindent \\textbf{" + step.stepName + "}\n\n";
+            tex += "\\ReportStep{" + escapeLatexText(step.stepName) + "}\n";
 
             QString texOptZ;
             if (currentOriginalLp.isMaximize) {
@@ -965,10 +1213,10 @@ WdSolve::WdSolve(QWidget *parent)
 
             QString texUnbounded;
             if (currentOriginalLp.isMaximize) {
-                texUnbounded = "\\noindent\\textit{\\textbf{* Giải thích không giới nội:} các hệ số đứng trước biến ứng với hệ số âm nhất ở hàm mục tiêu trong các phương trình ở hệ ràng buộc đều dương.}\\\\\n"
+                texUnbounded = "\\noindent\\textit{\\textbf{* Giải thích không giới nội:} tồn tại một biến không cơ sở làm cải thiện hàm mục tiêu, đồng thời các hệ số của biến đó trong các phương trình ràng buộc không làm phá vỡ tính khả thi.}\\\\\n"
                                "\\noindent\\textit{\\textbf{* Giải thích:} Hàm mục tiêu có thể tăng lên vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Max Z là $+\\infty$.}\n\n";
             } else {
-                texUnbounded = "\\noindent\\textit{\\textbf{* Giải thích không giới nội:} các hệ số đứng trước biến ứng với hệ số âm nhất ở hàm mục tiêu trong các phương trình ở hệ ràng buộc đều dương.}\\\\\n"
+                texUnbounded = "\\noindent\\textit{\\textbf{* Giải thích không giới nội:} tồn tại một biến không cơ sở làm cải thiện hàm mục tiêu, đồng thời các hệ số của biến đó trong các phương trình ràng buộc không làm phá vỡ tính khả thi.}\\\\\n"
                                "\\noindent\\textit{\\textbf{* Giải thích:} Hàm mục tiêu có thể giảm xuống vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Min Z là $-\\infty$.}\n\n";
             }
 
@@ -982,112 +1230,55 @@ WdSolve::WdSolve(QWidget *parent)
                 }
 
                 if (stepIdx == 0 && isPhase1Loc) {
-                    tex += "\\noindent\\textit{$\\rightarrow$ \\textbf{Phép xoay đặc biệt:} Đưa biến phụ $" + colorTexVar(enterVar, "green!50!black") + "$ vào cơ sở để thay thế $" + colorTexVar(leaveVar, "red") + "$ nhằm làm vế phải dương.}\\\\[0.15cm]\n";
+                    tex += "\\noindent\\textit{$\\rightarrow$ \\textbf{Phép xoay đặc biệt:} Đưa biến phụ $" + colorTexVar(enterVar, "ReportGreen") + "$ vào cơ sở để thay thế $" + colorTexVar(leaveVar, "ReportRed") + "$ nhằm làm vế phải dương.}\\\\[0.15cm]\n";
                 } else {
-                    tex += "\\noindent\\textit{$\\rightarrow$ Chọn $" + colorTexVar(enterVar, "green!50!black") + "$ làm biến vào, đẩy $" + colorTexVar(leaveVar, "red") + "$ ra khỏi cơ sở.}\\\\[0.15cm]\n";
+                    tex += "\\noindent\\textit{$\\rightarrow$ Chọn $" + colorTexVar(enterVar, "ReportGreen") + "$ làm biến vào, đẩy $" + colorTexVar(leaveVar, "ReportRed") + "$ ra khỏi cơ sở.}\\\\[0.15cm]\n";
 
                     if (zText.contains("Vô số nghiệm", Qt::CaseInsensitive) && stepIdx + 2 == currentHistory.size()) {
-                        tex += "\\noindent\\textcolor{red}{$\\rightarrow$ \\textbf{Kết luận:} Đã đạt từ vựng tối ưu và bài toán có vô số nghiệm.}\\\\[0.1cm]\n";
-                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích vô số nghiệm:} vì tồn tại hệ số của biến không cơ sở ở hàm mục tiêu bằng 0 nên bài toán có vô số nghiệm tối ưu.}}\\\\\n";
-                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích cách đọc nghiệm:} cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.}}\\\\\n";
-                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích giá trị tối ưu:} " + texOptZ + "}}\\\\\n";
-                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Lưu ý:} Bước xoay tiếp theo chỉ để tìm tọa độ tối ưu thứ 2.}}\\\\[0.15cm]\n";
+                        tex += "\\noindent\\textcolor{ReportRed}{$\\rightarrow$ \\textbf{Kết luận:} Đã đạt từ vựng tối ưu và bài toán có vô số nghiệm.}\\\\[0.1cm]\n";
+                        tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Giải thích vô số nghiệm:} vì tồn tại hệ số của biến không cơ sở ở hàm mục tiêu bằng 0 nên bài toán có vô số nghiệm tối ưu.}}\\\\\n";
+                        tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Giải thích cách đọc nghiệm:} cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.}}\\\\\n";
+                        tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Giải thích giá trị tối ưu:} " + texOptZ + "}}\\\\\n";
+                        tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Lưu ý:} Bước xoay tiếp theo chỉ để tìm tọa độ tối ưu thứ 2.}}\\\\[0.15cm]\n";
                     }
                 }
             } else {
                 if (!isLastStepTex) {
                     if (isPhase1Loc) {
-                        tex += "\\noindent\\textcolor{red}{$\\rightarrow$ \\textbf{Kết luận:} Đã đạt từ vựng tối ưu của Pha 1.}\\\\[0.1cm]\n";
+                        tex += "\\noindent\\textcolor{ReportRed}{$\\rightarrow$ \\textbf{Kết luận:} Đã đạt từ vựng tối ưu của Pha 1.}\\\\[0.1cm]\n";
                     } else {
                         tex += "\\noindent\\textit{$\\rightarrow$ Hệ phương trình đã sẵn sàng. Tiếp tục thuật toán Đơn hình.}\\\\[0.15cm]\n";
                     }
                 } else {
                     if (zText.contains("Không giới nội", Qt::CaseInsensitive)) {
-                        tex += "\\noindent\\textcolor{red}{$\\rightarrow$ \\textbf{Kết luận:} Bài toán không giới nội. Dừng thuật toán.}\\\\[0.1cm]\n";
+                        tex += "\\noindent\\textcolor{ReportRed}{$\\rightarrow$ \\textbf{Kết luận:} Bài toán không giới nội. Dừng thuật toán.}\\\\[0.1cm]\n";
                         tex += texUnbounded;
                     } else if (zText.contains("Vô nghiệm", Qt::CaseInsensitive)) {
-                        tex += "\\noindent\\textcolor{red}{$\\rightarrow$ \\textbf{Kết luận:} Bài toán vô nghiệm. Dừng thuật toán.}\\\\[0.1cm]\n";
-                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích:} Hệ ràng buộc mâu thuẫn nhau nên không tồn tại phương án thỏa mãn tất cả các ràng buộc.}}\\\\[0.15cm]\n";
+                        tex += "\\noindent\\textcolor{ReportRed}{$\\rightarrow$ \\textbf{Kết luận:} Bài toán vô nghiệm. Dừng thuật toán.}\\\\[0.1cm]\n";
+                        tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Giải thích:} Hệ ràng buộc mâu thuẫn nhau nên không tồn tại phương án thỏa mãn tất cả các ràng buộc.}}\\\\[0.15cm]\n";
                     } else if (zText.contains("Vô số nghiệm", Qt::CaseInsensitive)) {
-                        tex += "\\noindent\\textcolor{red}{$\\rightarrow$ \\textbf{Kết luận:} Đã tìm được tọa độ tối ưu thứ 2. Dừng thuật toán.}\\\\[0.1cm]\n";
-                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích cách lấy nghiệm tối ưu:} cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.}}\\\\\n";
-                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích giá trị tối ưu:} " + texOptZ + "}}\\\\[0.15cm]\n";
+                        tex += "\\noindent\\textcolor{ReportRed}{$\\rightarrow$ \\textbf{Kết luận:} Đã tìm được tọa độ tối ưu thứ 2. Dừng thuật toán.}\\\\[0.1cm]\n";
+                        tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Giải thích cách lấy nghiệm tối ưu:} cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.}}\\\\\n";
+                        tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Giải thích giá trị tối ưu:} " + texOptZ + "}}\\\\[0.15cm]\n";
                     } else {
-                        tex += "\\noindent\\textcolor{red}{$\\rightarrow$ \\textbf{Kết luận:} Đã đạt từ vựng tối ưu. Dừng thuật toán.}\\\\[0.1cm]\n";
-                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích cách đọc nghiệm:} cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.}}\\\\\n";
-                        tex += "\\noindent\\textcolor{blue}{\\textit{\\textbf{* Giải thích giá trị tối ưu:} " + texOptZ + "}}\\\\[0.15cm]\n";
+                        tex += "\\noindent\\textcolor{ReportRed}{$\\rightarrow$ \\textbf{Kết luận:} Đã đạt từ vựng tối ưu. Dừng thuật toán.}\\\\[0.1cm]\n";
+                        tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Giải thích cách đọc nghiệm:} cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.}}\\\\\n";
+                        tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Giải thích giá trị tối ưu:} " + texOptZ + "}}\\\\[0.15cm]\n";
                     }
                 }
             }
 
-            tex += "\\begin{center}\n\\[\n\\begin{array}{r c r " + QString("c r l ").repeated(nonBasicVars.size()) + "}\n";
-
+            // [FIX PDF/TEX - BẢNG TỪ VỰNG CĂN CỘT]
+            // In cả từ vựng thành các block có cùng cột, giúp hệ số và biến
+            // thẳng hàng theo chiều dọc, dễ đọc hơn và không tràn ngang.
             std::vector<int> rowOrder;
             rowOrder.push_back(m);
-            for (int i = 0; i < m; ++i) { rowOrder.push_back(i); }
-
-            bool isFirstConstraintRowTex = true;
-            for (int i : rowOrder) {
-                bool isZRow = (i == m);
-                if (!isZRow && isFirstConstraintRowTex) {
-                    tex += "\\hline\n";
-                    isFirstConstraintRowTex = false;
-                }
-
-                QString lhsVar = isZRow ? (isPhase1Loc ? "\\xi" : (currentOriginalLp.isMaximize ? "-Z" : "Z")) : getVarNameTex(step.currentBasicVars[i]);
-                if (!isZRow && i == step.pivotRow) {
-                    lhsVar = colorTexVar(lhsVar, "red");
-                }
-                tex += lhsVar + " & = & ";
-
-                double rhsVal = isZRow ? -step.matrix[m][n] : step.matrix[i][n];
-                if (std::abs(rhsVal) < 1e-9) rhsVal = 0.0;
-
-                bool hasVarTerms = false;
-                for (int j : nonBasicVars) {
-                    // [FIX PDF/TEX MAX -> MIN(-Z)]
-                    // Dòng hàm mục tiêu phải lấy dấu giống bảng "Các bước thực thi".
-                    // Với bài toán Max, thuật toán hiển thị dưới dạng Min(-Z), nên hệ số ở dòng -Z
-                    // phải dùng trực tiếp step.matrix[m][j], không đảo dấu như các dòng ràng buộc.
-                    double coeff = isZRow ? step.matrix[m][j] : -step.matrix[i][j];
-                    if (isZRow && stepIdx == 0 && isPhase1Loc && (varNames[j] == "x_0" || varNames[j] == "x0")) coeff = 1.0;
-                    if (std::abs(coeff) >= 1e-9) hasVarTerms = true;
-                }
-
-                bool hasConst = std::abs(rhsVal) >= 1e-9 || !hasVarTerms;
-                QString constTex = hasConst ? formatVal(rhsVal) : "";
-                tex += constTex;
-
-                bool isFirstRhsTerm = !hasConst;
-
-                for (int j : nonBasicVars) {
-                    // [FIX PDF/TEX MAX -> MIN(-Z)]
-                    // Dòng hàm mục tiêu phải lấy dấu giống bảng "Các bước thực thi".
-                    // Với bài toán Max, thuật toán hiển thị dưới dạng Min(-Z), nên hệ số ở dòng -Z
-                    // phải dùng trực tiếp step.matrix[m][j], không đảo dấu như các dòng ràng buộc.
-                    double coeff = isZRow ? step.matrix[m][j] : -step.matrix[i][j];
-                    if (isZRow && stepIdx == 0 && isPhase1Loc && (varNames[j] == "x_0" || varNames[j] == "x0")) coeff = 1.0;
-
-                    if (std::abs(coeff) < 1e-9) {
-                        tex += " & & & ";
-                    } else {
-                        QString sign = "";
-                        if (coeff > 0) sign = isFirstRhsTerm ? "" : "+";
-                        else sign = "-";
-                        isFirstRhsTerm = false;
-
-                        bool isOne = (std::abs(std::abs(coeff) - 1.0) < 1e-9);
-                        QString cStr = isOne ? "" : formatCoeff(coeff);
-                        QString rhsVar = getVarNameTex(j);
-                        if (j == step.pivotCol) {
-                            rhsVar = colorTexVar(rhsVar, "green!50!black");
-                        }
-                        tex += " & " + sign + " & " + cStr + " & " + rhsVar;
-                    }
-                }
-                tex += " \\\\\n";
+            for (int i = 0; i < m; ++i) {
+                rowOrder.push_back(i);
             }
-            tex += "\\end{array}\n\\]\n\\end{center}\n";
+
+            appendDictionaryBlockTex(step, rowOrder, nonBasicVars, m, n, isPhase1Loc, stepIdx);
+
 
             if (globalIsPhase1 && (int)stepIdx == lastPhase1StepIdx) {
                 double xi_val = -step.matrix[m][n];
@@ -1099,8 +1290,10 @@ WdSolve::WdSolve(QWidget *parent)
             }
         }
 
-        tex += "\\section*{3. Kết luận}\n";
-        tex += "\\noindent\\textbf{Trạng thái:} " + reportStatus + "\\\\[0.2cm]\n";
+        tex += "\\ReportSection{3. Kết luận}\n";
+        tex += "\\begin{center}\n";
+        tex += "\\fcolorbox{ReportBlue}{ReportGray}{\\begin{minipage}{0.94\\textwidth}\n";
+        tex += "\\textbf{Trạng thái:} " + reportStatus + "\\\\[0.18cm]\n";
 
         // [FIX KHÔNG GIỚI NỘI] Ghi rõ giá trị tối ưu vô hạn trong file .tex/PDF LaTeX.
         if (zText.contains("Không giới nội", Qt::CaseInsensitive)) {
@@ -1125,6 +1318,8 @@ WdSolve::WdSolve(QWidget *parent)
                 tex += "\\noindent\\textbf{Nghiệm tối ưu:} $" + varListTex + " = " + optSolTex + "$\n\n";
             }
         }
+        tex += "\\end{minipage}}\n";
+        tex += "\\end{center}\n";
         tex += "\\end{document}";
 
 
@@ -1942,7 +2137,7 @@ void WdSolve::displayResults(const LinearProgram& lp,
                     commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 5px;'>&rarr; <b>Kết luận:</b> Bài toán không giới nội. Dừng thuật toán.</p>";
                     commonIntroHtml += "<p style='color: #0056b3; font-size: 11.5pt; margin-bottom: 20px; font-style: italic;'>";
 
-                    commonIntroHtml += "<b>* Giải thích không giới nội:</b> các hệ số đứng trước biến ứng với hệ số âm nhất ở hàm mục tiêu trong các phương trình ở hệ ràng buộc đều dương.<br>";
+                    commonIntroHtml += "<b>* Giải thích không giới nội:</b> tồn tại một biến không cơ sở làm cải thiện hàm mục tiêu, đồng thời các hệ số của biến đó trong các phương trình ràng buộc không làm phá vỡ tính khả thi.<br>";
 
                     if (originalLp.isMaximize) {
                         commonIntroHtml += "<b>* Giải thích:</b> Hàm mục tiêu có thể tăng lên vô hạn mà không vi phạm các ràng buộc. Do đó, giá trị tối ưu của bài toán Max Z là <b>+&infin;</b>.";
@@ -2297,6 +2492,245 @@ void WdSolve::on_pushButton_3_clicked()
         return expr;
     };
 
+    // ===================================================================
+    // [FIX CHATBOT CONTEXT]
+    // Truyền thêm toàn bộ dữ liệu đang hiển thị ở cửa sổ WdSolve cho Chatbot:
+    // - Bảng nghiệm / giá trị tối ưu
+    // - Các từ vựng theo từng bước
+    // - Bảng đơn hình theo từng bước
+    // Chỉ phục vụ context cho Chatbot, không thay đổi thuật toán / UI khác.
+    // ===================================================================
+    auto buildInternalVariableNames = [&]() -> std::vector<QString> {
+        std::vector<QString> names;
+
+        for (size_t i = 0; i < currentOriginalLp.varBounds.size(); ++i) {
+            if (currentOriginalLp.varBounds[i].isFree || currentOriginalLp.varBounds[i].sign == "free") {
+                names.push_back(QString("x%1+").arg(i + 1));
+                names.push_back(QString("x%1-").arg(i + 1));
+            } else {
+                names.push_back(QString("x%1").arg(i + 1));
+            }
+        }
+
+        if (!currentHistory.empty() &&
+            !currentHistory[0].matrix.empty() &&
+            !currentHistory[0].matrix[0].empty()) {
+            int totalColsWithoutRhs = (int)currentHistory[0].matrix[0].size() - 1;
+            int remain = totalColsWithoutRhs - (int)names.size();
+
+            bool hasPhase = false;
+            for (const SimplexStep& step : currentHistory) {
+                if (step.stepName.contains("Pha 1", Qt::CaseInsensitive) ||
+                    step.stepName.contains("Pha 2", Qt::CaseInsensitive)) {
+                    hasPhase = true;
+                    break;
+                }
+            }
+
+            if (hasPhase) remain -= 1;
+            if (remain < 0) remain = 0;
+
+            for (int i = 0; i < remain; ++i) {
+                names.push_back(QString("w%1").arg(i + 1));
+            }
+
+            if (hasPhase) {
+                names.push_back("x0");
+            }
+        }
+
+        return names;
+    };
+
+    std::vector<QString> contextVarNames = buildInternalVariableNames();
+
+    auto getStepVarName = [&](int index) -> QString {
+        if (index >= 0 && index < (int)contextVarNames.size()) {
+            return contextVarNames[index];
+        }
+        return QString("?");
+    };
+
+    auto buildVocabularyEquation = [&](const SimplexStep& step, int rowIndex, bool isPhase1Step) -> QString {
+        if (step.matrix.empty() || step.matrix[0].empty()) return "";
+
+        int m = (int)step.matrix.size() - 1;
+        int n = (int)step.matrix[0].size() - 1;
+        bool isZRow = (rowIndex == m);
+
+        QString lhs;
+        if (isZRow) {
+            lhs = isPhase1Step ? "ξ" : (currentOriginalLp.isMaximize ? "-Z" : "Z");
+        } else {
+            lhs = getStepVarName(step.currentBasicVars[rowIndex]);
+        }
+
+        double rhsVal = isZRow ? -step.matrix[m][n] : step.matrix[rowIndex][n];
+        if (std::abs(rhsVal) < 1e-9) rhsVal = 0.0;
+
+        QString eq = lhs + " = " + formatNumber(rhsVal);
+
+        for (int col = 0; col < n; ++col) {
+            bool isBasic = false;
+            for (int r = 0; r < m; ++r) {
+                if (step.currentBasicVars[r] == col) {
+                    isBasic = true;
+                    break;
+                }
+            }
+            if (isBasic) continue;
+
+            if (!isPhase1Step && (getStepVarName(col) == "x0")) {
+                continue;
+            }
+
+            double coeff = isZRow ? step.matrix[m][col] : -step.matrix[rowIndex][col];
+            if (isZRow && isPhase1Step && getStepVarName(col) == "x0") {
+                coeff = 1.0;
+            }
+
+            if (std::abs(coeff) < 1e-9) continue;
+
+            eq += (coeff >= 0) ? " + " : " - ";
+            double absCoeff = std::abs(coeff);
+
+            if (std::abs(absCoeff - 1.0) >= 1e-9) {
+                eq += formatNumber(absCoeff) + "*";
+            }
+            eq += getStepVarName(col);
+        }
+
+        return eq;
+    };
+
+    auto buildSimplexTableText = [&](const SimplexStep& step, bool isPhase1Step) -> QString {
+        if (step.matrix.empty() || step.matrix[0].empty()) return "";
+
+        int m = (int)step.matrix.size() - 1;
+        int n = (int)step.matrix[0].size() - 1;
+
+        QString tableText;
+        tableText += "Bảng đơn hình của " + step.stepName + ":\n";
+        tableText += "Dòng | Cơ sở | RHS";
+
+        for (int col = 0; col < n; ++col) {
+            if (!isPhase1Step && getStepVarName(col) == "x0") continue;
+            tableText += " | " + getStepVarName(col);
+        }
+        tableText += "\n";
+
+        QString objectiveLabel = isPhase1Step ? "ξ" : (currentOriginalLp.isMaximize ? "-Z" : "Z");
+        tableText += "0 | " + objectiveLabel + " | " + formatNumber(step.matrix[m][n]);
+        for (int col = 0; col < n; ++col) {
+            if (!isPhase1Step && getStepVarName(col) == "x0") continue;
+            tableText += " | " + formatNumber(step.matrix[m][col]);
+        }
+        tableText += "\n";
+
+        for (int row = 0; row < m; ++row) {
+            QString basis = getStepVarName(step.currentBasicVars[row]);
+            tableText += QString("%1 | %2 | %3")
+                             .arg(row + 1)
+                             .arg(basis)
+                             .arg(formatNumber(step.matrix[row][n]));
+
+            for (int col = 0; col < n; ++col) {
+                if (!isPhase1Step && getStepVarName(col) == "x0") continue;
+                tableText += " | " + formatNumber(step.matrix[row][col]);
+            }
+            tableText += "\n";
+        }
+
+        if (step.pivotCol >= 0 && step.pivotRow >= 0) {
+            tableText += "Biến vào: " + getStepVarName(step.pivotCol) + "\n";
+            tableText += "Biến ra: " + getStepVarName(step.currentBasicVars[step.pivotRow]) + "\n";
+            tableText += "Dòng trụ: " + QString::number(step.pivotRow + 1) + "\n";
+            tableText += "Cột trụ: " + getStepVarName(step.pivotCol) + "\n";
+        } else {
+            tableText += "Không có phép xoay ở bước này.\n";
+        }
+
+        return tableText;
+    };
+
+    auto buildAllExecutionStepsForChatbot = [&]() -> QString {
+        QString result;
+
+        if (currentHistory.empty()) {
+            return "Không có dữ liệu các bước thực thi.\n";
+        }
+
+        bool isPhase1Step = false;
+        for (const SimplexStep& step : currentHistory) {
+            if (step.stepName.contains("Pha 1", Qt::CaseInsensitive) ||
+                step.stepName.contains("Pha 2", Qt::CaseInsensitive)) {
+                isPhase1Step = true;
+                break;
+            }
+        }
+
+        result += "\n5) CÁC BƯỚC THỰC THI - DẠNG TỪ VỰNG\n";
+        result += "Lưu ý: Đây là dữ liệu từ tab [w, x, z] HIỂN THỊ DẠNG TỪ VỰNG trong cửa sổ kết quả.\n";
+
+        for (size_t stepIdx = 0; stepIdx < currentHistory.size(); ++stepIdx) {
+            const SimplexStep& step = currentHistory[stepIdx];
+
+            if (step.stepName.contains("Pha 2", Qt::CaseInsensitive)) {
+                isPhase1Step = false;
+            }
+
+            if (step.matrix.empty() || step.matrix[0].empty()) continue;
+
+            int m = (int)step.matrix.size() - 1;
+
+            result += "\n--- " + step.stepName + " ---\n";
+
+            if (step.pivotCol >= 0 && step.pivotRow >= 0) {
+                QString enterVar = getStepVarName(step.pivotCol);
+                QString leaveVar = getStepVarName(step.currentBasicVars[step.pivotRow]);
+
+                result += "Mô tả phép xoay: Chọn " + enterVar + " làm biến vào, đẩy " + leaveVar + " ra khỏi cơ sở.\n";
+                result += "Biến vào: " + enterVar + "\n";
+                result += "Biến ra: " + leaveVar + "\n";
+                result += "Dòng trụ: " + QString::number(step.pivotRow + 1) + "\n";
+                result += "Cột trụ: " + enterVar + "\n";
+            } else {
+                result += "Mô tả phép xoay: Không có phép xoay ở bước này.\n";
+            }
+
+            result += "Từ vựng / hệ phương trình tại bước này:\n";
+            result += buildVocabularyEquation(step, m, isPhase1Step) + "\n";
+            for (int row = 0; row < m; ++row) {
+                result += buildVocabularyEquation(step, row, isPhase1Step) + "\n";
+            }
+        }
+
+        isPhase1Step = false;
+        for (const SimplexStep& step : currentHistory) {
+            if (step.stepName.contains("Pha 1", Qt::CaseInsensitive) ||
+                step.stepName.contains("Pha 2", Qt::CaseInsensitive)) {
+                isPhase1Step = true;
+                break;
+            }
+        }
+
+        result += "\n6) CÁC BƯỚC THỰC THI - DẠNG BẢNG ĐƠN HÌNH\n";
+        result += "Lưu ý: Đây là dữ liệu từ tab HIỂN THỊ DẠNG BẢNG trong cửa sổ kết quả.\n";
+
+        for (size_t stepIdx = 0; stepIdx < currentHistory.size(); ++stepIdx) {
+            const SimplexStep& step = currentHistory[stepIdx];
+
+            if (step.stepName.contains("Pha 2", Qt::CaseInsensitive)) {
+                isPhase1Step = false;
+            }
+
+            result += "\n--- " + step.stepName + " ---\n";
+            result += buildSimplexTableText(step, isPhase1Step);
+        }
+
+        return result;
+    };
+
     QString optType = lp.isMaximize ? "Max" : "Min";
     QString contextString;
 
@@ -2345,7 +2779,7 @@ void WdSolve::on_pushButton_3_clicked()
     }
 
     contextString += "\n4) KẾT QUẢ PHẦN MỀM ĐÃ GIẢI RA\n";
-    contextString += "Giá trị hiển thị tại ô kết quả Z: " + ui->lineEdit_Z->text() + "\n";
+    contextString += "Trạng thái / giá trị hiển thị tại ô kết quả Z: " + ui->lineEdit_Z->text() + "\n";
 
     if (!currentSolution.empty()) {
         contextString += "Nghiệm tối ưu đang hiển thị:\n";
@@ -2361,9 +2795,33 @@ void WdSolve::on_pushButton_3_clicked()
         }
     }
 
+    if (ui->table_solution->rowCount() > 0 && ui->table_solution->columnCount() > 0) {
+        contextString += "\nBảng nghiệm đang hiển thị trong cửa sổ kết quả:\n";
+
+        QStringList tableHeaders;
+        for (int col = 0; col < ui->table_solution->columnCount(); ++col) {
+            QTableWidgetItem *header = ui->table_solution->horizontalHeaderItem(col);
+            tableHeaders << (header ? header->text() : QString("Cột %1").arg(col + 1));
+        }
+        contextString += tableHeaders.join(" | ") + "\n";
+
+        for (int row = 0; row < ui->table_solution->rowCount(); ++row) {
+            QStringList rowValues;
+            for (int col = 0; col < ui->table_solution->columnCount(); ++col) {
+                QTableWidgetItem *item = ui->table_solution->item(row, col);
+                rowValues << (item ? item->text() : "");
+            }
+            contextString += rowValues.join(" | ") + "\n";
+        }
+    }
+
+    contextString += buildAllExecutionStepsForChatbot();
+
     contextString += "\n--- HƯỚNG DẪN DÀNH CHO BẠN (TRỢ LÝ AI) ---\n";
-    contextString += "Bạn là một AI hỗ trợ giải đáp toán học môn Quy hoạch tuyến tính. Bạn CHỈ được phép giải thích hoặc trả lời các câu hỏi liên quan đến nội dung bài toán quy hoạch tuyến tính ở trên, phương pháp giải, hoặc các khái niệm toán học liên quan.\n";
+    contextString += "Bạn là một AI hỗ trợ giải đáp toán học môn Quy hoạch tuyến tính. Bạn CHỈ được phép giải thích hoặc trả lời các câu hỏi liên quan đến nội dung bài toán quy hoạch tuyến tính ở trên, phương pháp giải, bảng đơn hình, từ vựng, hoặc các khái niệm toán học liên quan.\n";
+    contextString += "Khi người dùng hỏi về 'từ vựng', 'bảng', 'bảng đơn hình', 'các bước thực thi', 'biến vào', 'biến ra', 'dòng trụ', 'cột trụ', hãy ưu tiên dùng dữ liệu trong mục 5 và mục 6 của context.\n";
     contextString += "Khi giải thích hệ ràng buộc, bắt buộc phải dùng đúng dấu ràng buộc đã cung cấp trong từng dòng R1, R2, ... Không được tự đổi chiều dấu và không được bỏ mất vế phải.\n";
+    contextString += "Nếu người dùng hỏi về nghiệm tối ưu hoặc giá trị tối ưu, hãy đối chiếu cả mục 4, bảng nghiệm đang hiển thị, và các bước thực thi trước khi trả lời.\n";
     contextString += "QUAN TRỌNG: Nếu người dùng hỏi bất kỳ câu hỏi ngoài lề (không thuộc phạm vi của bài toán hoặc quy hoạch tuyến tính), bạn KHÔNG ĐƯỢC trả lời nội dung đó. Bạn BẮT BUỘC phải trả lời chính xác bằng câu sau và không giải thích gì thêm:\n\"Xin lỗi câu hỏi của bạn không thuộc phạm vi của bài toán\"";
 
     if (!this->wd_ChatBot) this->wd_ChatBot = new WdChatBot(this);

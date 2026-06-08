@@ -125,118 +125,172 @@ void SimplexSolver::handleVariableBounds() {
 // Tự động nhận diện ma trận cơ sở & thêm biến bù (slack) / biến giả (artificial)
 // -----------------------------------------------------------------------
 void SimplexSolver::addSlackAndSurplusVariables() {
-    int m = lp.signs.size();
+    int m = (int)lp.signs.size();
     this->basicVariables.assign(m, -1);
 
+    // ===================================================================
+    // [FIX] KHÔNG thêm slack/biến giả riêng cho ràng buộc "=".
+    // - Ràng buộc <=: thêm slack +1 như bình thường để có biến cơ sở.
+    // - Ràng buộc = : giữ đúng bản chất phương trình, sau đó chọn một
+    //   biến hiện có làm biến cơ sở bằng phép khử Gauss-Jordan.
+    //
+    // Lý do: nếu thêm cột +1 cho ràng buộc "=", bài toán bị nới lỏng
+    // thành dạng <= và có thể cho nghiệm sai.
+    // ===================================================================
+
+    // 1) Thêm slack chỉ cho các ràng buộc <=.
     for (int i = 0; i < m; ++i) {
-        bool foundIdentity = false;
+        QString s = lp.signs[i].trimmed();
 
-        // Nếu là ràng buộc '=', thử tìm xem có cột nào tạo thành vector đơn vị e_i không
-        if (lp.signs[i] == "=" || lp.signs[i] == "==") {
-            for (size_t j = 0; j < lp.c.size(); ++j) {
-                if (std::abs(lp.A[i][j] - 1.0) < CLEAN_EPS && std::abs(lp.c[j]) < CLEAN_EPS) {
-                    bool isBasicCol = true;
-                    // Kiểm tra các phần tử khác trong cột có bằng 0 không
-                    for (int r = 0; r < m; ++r) {
-                        if (r != i && std::abs(lp.A[r][j]) > CLEAN_EPS) {
-                            isBasicCol = false;
-                            break;
-                        }
-                    }
-                    if (isBasicCol) {
-                        // Tránh dùng lại cột đã được chọn làm biến cơ sở cho dòng khác
-                        bool alreadyUsed = false;
-                        for(int r = 0; r < i; ++r) {
-                            if (basicVariables[r] == (int)j) alreadyUsed = true;
-                        }
-                        if (!alreadyUsed) {
-                            basicVariables[i] = j;
-                            foundIdentity = true;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+        if (s == "<=") {
+            for (int row = 0; row < m; ++row)
+                lp.A[row].push_back((row == i) ? 1.0 : 0.0);
 
-        // Nếu không có biến nào thỏa mãn ma trận cơ sở, tiến hành thêm biến bù/biến giả
-        if (!foundIdentity) {
-            if (lp.signs[i] == "<=" || lp.signs[i] == "=" || lp.signs[i] == "==") {
-                // Thêm một cột mới đại diện cho biến bù/giả
-                for (int row = 0; row < m; ++row)
-                    lp.A[row].push_back((row == i) ? 1.0 : 0.0);
-                lp.c.push_back(0.0);
-                basicVariables[i] = lp.c.size() - 1; // Gán biến này làm biến cơ sở cho dòng i
-                lp.signs[i] = "=";
-            }
-        } else {
+            lp.c.push_back(0.0);
+            basicVariables[i] = (int)lp.c.size() - 1;
+            lp.signs[i] = "=";
+        } else if (s == "=" || s == "==") {
             lp.signs[i] = "=";
         }
     }
+
+    // 2) Nhận diện sẵn các cột đơn vị có thể làm cơ sở cho hàng "=".
+    std::set<int> usedBasicCols;
+    for (int i = 0; i < m; ++i) {
+        if (basicVariables[i] >= 0)
+            usedBasicCols.insert(basicVariables[i]);
+    }
+
+    for (int i = 0; i < m; ++i) {
+        if (basicVariables[i] != -1) continue;
+
+        for (int j = 0; j < (int)lp.c.size(); ++j) {
+            if (usedBasicCols.count(j)) continue;
+            if (std::abs(lp.A[i][j] - 1.0) > CLEAN_EPS) continue;
+
+            bool isIdentity = true;
+            for (int r = 0; r < m; ++r) {
+                if (r != i && std::abs(lp.A[r][j]) > CLEAN_EPS) {
+                    isIdentity = false;
+                    break;
+                }
+            }
+
+            if (isIdentity) {
+                basicVariables[i] = j;
+                usedBasicCols.insert(j);
+                break;
+            }
+        }
+    }
+
+    // 3) Với các hàng "=" chưa có biến cơ sở, chọn một biến hiện có
+    //    rồi khử để tạo cột đơn vị. Đây KHÔNG phải biến giả pha 1.
+    for (int i = 0; i < m; ++i) {
+        if (basicVariables[i] != -1) continue;
+
+        int pivotCol = -1;
+        double bestAbs = 0.0;
+
+        for (int j = 0; j < (int)lp.c.size(); ++j) {
+            if (usedBasicCols.count(j)) continue;
+            double v = std::abs(lp.A[i][j]);
+            if (v > bestAbs + CLEAN_EPS) {
+                bestAbs = v;
+                pivotCol = j;
+            }
+        }
+
+        if (pivotCol == -1 || bestAbs <= CLEAN_EPS) {
+            statusMsg = "Không tạo được cơ sở ban đầu cho ràng buộc bằng (=).";
+            continue;
+        }
+
+        double pivot = lp.A[i][pivotCol];
+        for (int j = 0; j < (int)lp.c.size(); ++j) {
+            lp.A[i][j] /= pivot;
+            if (std::abs(lp.A[i][j]) < CLEAN_EPS) lp.A[i][j] = 0.0;
+        }
+        lp.b[i] /= pivot;
+        if (std::abs(lp.b[i]) < CLEAN_EPS) lp.b[i] = 0.0;
+
+        for (int r = 0; r < m; ++r) {
+            if (r == i) continue;
+            double factor = lp.A[r][pivotCol];
+            if (std::abs(factor) <= CLEAN_EPS) continue;
+
+            for (int j = 0; j < (int)lp.c.size(); ++j) {
+                lp.A[r][j] -= factor * lp.A[i][j];
+                if (std::abs(lp.A[r][j]) < CLEAN_EPS) lp.A[r][j] = 0.0;
+            }
+            lp.b[r] -= factor * lp.b[i];
+            if (std::abs(lp.b[r]) < CLEAN_EPS) lp.b[r] = 0.0;
+        }
+
+        basicVariables[i] = pivotCol;
+        usedBasicCols.insert(pivotCol);
+    }
 }
+
 
 // Hàm chính điều phối việc giải bài toán
 bool SimplexSolver::solve() {
     convertToStandardForm();
 
-    // Kiểm tra xem có hệ số b nào âm không (nếu có, cần giải bằng Đơn hình 2 pha)
+    if (statusMsg.contains("Không tạo được cơ sở", Qt::CaseInsensitive)) {
+        return false;
+    }
+
+    // Kiểm tra xem có hệ số b nào âm không. Nếu có, cần pha 1.
     bool needsPhase1 = false;
     for (double b_val : lp.b) {
         if (b_val < -CLEAN_EPS) { needsPhase1 = true; break; }
     }
 
-    if (needsPhase1) {
-        // Kiểm tra loại thuật toán người dùng chọn
-        if (lp.algoType == 0 || lp.algoType == 1) {
+    // Nếu người dùng chọn 2 pha thì vẫn cho chạy 2 pha.
+    // Pha 1 ở đây chỉ dùng MỘT biến giả duy nhất x0/a0.
+    if (needsPhase1 || lp.algoType == 2) {
+        if (needsPhase1 && (lp.algoType == 0 || lp.algoType == 1)) {
             statusMsg = "Không giải được với thuật toán Đơn hình! "
                         "(Tồn tại hệ số b_i âm ở dạng chuẩn, bạn có thể sử dụng đơn hình 2 pha hoặc chế độ tự động).";
             return false;
         }
-        return solveTwoPhase(); // Chạy 2 pha nếu có b âm
-    } else {
-        // Nếu không có b âm mà người dùng ép dùng 2 pha thì báo lỗi
-        if (lp.algoType == 2) {
-            statusMsg = "Không giải được với thuật toán 2 Pha! "
-                        "(Bài toán dạng cơ bản chỉ cần Đơn hình tiêu chuẩn hoặc Bland).";
-            return false;
+        return solveTwoPhase();
+    }
+
+    buildTableau();
+    bool success = runSimplexLoop();
+    if (!success) return false;
+
+    // Xử lý sau khi tìm được một nghiệm tối ưu (kiểm tra có vô số nghiệm không)
+    if (checkAlternativeOptima()) {
+        this->firstSolution = this->getSolution();
+        findAndRecordAlternativeOptimum();
+
+        bool isReallyDifferent = false;
+        for (size_t i = 0; i < firstSolution.size(); ++i) {
+            if (std::abs(firstSolution[i] - altSolution[i]) > CLEAN_EPS) {
+                isReallyDifferent = true;
+                break;
+            }
         }
 
-        buildTableau();
-        bool success = runSimplexLoop();
-        if (!success) return false;
-
-        // Xử lý sau khi tìm được một nghiệm tối ưu (kiểm tra có vô số nghiệm không)
-        if (checkAlternativeOptima()) {
-            this->firstSolution = this->getSolution();
-            findAndRecordAlternativeOptimum();
-
-            // KIỂM TRA NGHIỆM ẢO ĐỂ QUYẾT ĐỊNH STATUS
-            // So sánh nghiệm thứ nhất và nghiệm thứ hai xem có thực sự khác nhau không (chống suy biến)
-            bool isReallyDifferent = false;
-            for (size_t i = 0; i < firstSolution.size(); ++i) {
-                if (std::abs(firstSolution[i] - altSolution[i]) > CLEAN_EPS) {
-                    isReallyDifferent = true;
-                    break;
-                }
-            }
-
-            if (isReallyDifferent) {
-                statusMsg = "Vô số nghiệm";
-            } else {
-                statusMsg = "Tối ưu";
-                // Xóa lịch sử "Điểm tối ưu thứ 2" nếu đó chỉ là nghiệm ảo
-                if (!history.empty() && history.back().stepName == "Điểm tối ưu thứ 2") {
-                    history.pop_back();
-                }
-            }
+        if (isReallyDifferent) {
+            statusMsg = "Vô số nghiệm";
         } else {
             statusMsg = "Tối ưu";
-            this->firstSolution = this->getSolution();
-            this->altSolution   = this->firstSolution;
+            if (!history.empty() && history.back().stepName == "Điểm tối ưu thứ 2") {
+                history.pop_back();
+            }
         }
-        return true;
+    } else {
+        statusMsg = "Tối ưu";
+        this->firstSolution = this->getSolution();
+        this->altSolution   = this->firstSolution;
     }
+    return true;
 }
+
 
 // Xây dựng Bảng đơn hình (Tableau) ban đầu
 void SimplexSolver::buildTableau() {
@@ -249,14 +303,36 @@ void SimplexSolver::buildTableau() {
         for (int j = 0; j < n; ++j) tableau[i][j] = lp.A[i][j];
         tableau[i][n] = lp.b[i];
     }
+
     // Đổ hàm mục tiêu c vào hàng cuối cùng
     for (int j = 0; j < n; ++j)
         tableau[m][j] = lp.c[j];
+    tableau[m][n] = lp.c_0;
+
+    // ===================================================================
+    // [FIX] Canonical hóa hàng mục tiêu theo cơ sở hiện tại.
+    // Trước đây code chỉ đúng khi cơ sở là slack có c_j = 0. Với ràng buộc
+    // "=", ta có thể chọn biến gốc/biến tách làm biến cơ sở, c_j có thể khác 0.
+    // Nếu không khử cột cơ sở khỏi hàng mục tiêu, simplex sẽ giải sai.
+    // ===================================================================
+    for (int i = 0; i < m; ++i) {
+        int b_col = basicVariables[i];
+        if (b_col >= 0 && b_col < n) {
+            double factor = tableau[m][b_col];
+            if (std::abs(factor) > CLEAN_EPS) {
+                for (int j = 0; j <= n; ++j) {
+                    tableau[m][j] -= factor * tableau[i][j];
+                    if (std::abs(tableau[m][j]) < CLEAN_EPS) tableau[m][j] = 0.0;
+                }
+            }
+        }
+    }
 
     iterationCount = 0;
     QString stepTitle = lp.isMaximize ? "Từ vựng 1 (Biến đổi Max Z → Min -Z)" : "Từ vựng 1 (Khởi tạo)";
     recordStep(stepTitle);
 }
+
 
 // Tìm Cột xoay (Biến vào)
 int SimplexSolver::findPivotColumn() {
@@ -382,25 +458,27 @@ bool SimplexSolver::solveTwoPhase() {
 
     int cols = tableau[0].size() - 1;
 
-    // Chèn thêm 1 biến giả duy nhất (a_0) để xử lý mọi b < 0
+    // ===================================================================
+    // [FIX] PHA 1 CHỈ DÙNG 1 BIẾN GIẢ DUY NHẤT x0/a0.
+    // Không tạo a1, a2, ... cho từng ràng buộc.
+    // Cách làm: thêm x0 với hệ số -1 vào tất cả phương trình, nếu có b_i âm
+    // thì pivot x0 vào hàng có b_i âm nhất, rồi tối thiểu hóa x0.
+    // ===================================================================
     for (int i = 0; i <= m; ++i) {
         tableau[i].insert(tableau[i].begin() + cols, 0.0);
     }
     int a_col = cols;
-    cols++; // Cập nhật lại số lượng cột sau khi chèn
+    cols++;
 
-    // Gán hệ số -1 cho biến giả ở các phương trình ràng buộc
     for (int i = 0; i < m; ++i) {
         tableau[i][a_col] = -1.0;
     }
 
-    // Thiết lập hàm mục tiêu Pha 1: Minimize a_0 (Bằng cách đẩy hàm mục tiêu = a_0)
     for (int j = 0; j <= cols; ++j) tableau[m][j] = 0.0;
-    tableau[m][a_col] = 1.0;
+    tableau[m][a_col] = 1.0;   // Min x0
 
     recordStep("Từ vựng 1 (Khởi tạo Pha 1)");
 
-    // Xoay đặc biệt (Special Pivot): Đưa biến giả vào cơ sở ở hàng có b âm nhất
     int pivotRow = -1;
     double minRhs = 0.0;
     for (int i = 0; i < m; ++i) {
@@ -418,53 +496,78 @@ bool SimplexSolver::solveTwoPhase() {
         performPivot(pivotRow, a_col);
     }
 
-    // Chạy Đơn hình cho Pha 1
-    if (!this->runSimplexLoop()) return false;
+    if (!this->runSimplexLoop(true)) return false;
 
-    // Kết thúc Pha 1: Nếu giá trị tối ưu của biến giả > 0 -> Bài toán vô nghiệm (Infeasible)
-    if (std::abs(tableau[m][cols]) > CLEAN_EPS) {
-        statusMsg = "Vô nghiệm (Min ε > 0)";
+    // Nếu Min x0 > 0 thì bài toán gốc vô nghiệm.
+    // Với quy ước getOptimalZ ở pha 1, hằng số hàng mục tiêu có thể mang dấu âm
+    // sau các phép biến đổi, nên dùng trị tuyệt đối giá trị x0 cơ sở/giá trị mục tiêu.
+    double auxValue = 0.0;
+    for (int i = 0; i < m; ++i) {
+        if (basicVariables[i] == a_col) {
+            auxValue = tableau[i][cols];
+            break;
+        }
+    }
+    if (std::abs(tableau[m][cols]) > std::abs(auxValue)) auxValue = tableau[m][cols];
+
+    if (std::abs(auxValue) > CLEAN_EPS) {
+        statusMsg = "Vô nghiệm (Min x0 > 0)";
         if (!history.empty()) {
             history.back().isInfeasible = true;
         }
         return false;
     }
 
-    // ----------------------------------------------------
-    // KHỞI TẠO PHA 2: Khôi phục lại hàm mục tiêu ban đầu
-    // ----------------------------------------------------
+    // Nếu x0 còn trong cơ sở với giá trị 0, cố gắng pivot nó ra khỏi cơ sở.
+    for (int i = 0; i < m; ++i) {
+        if (basicVariables[i] == a_col) {
+            int replacementCol = -1;
+            for (int j = 0; j < cols; ++j) {
+                if (j == a_col) continue;
+                if (std::abs(tableau[i][j]) > CLEAN_EPS) {
+                    replacementCol = j;
+                    break;
+                }
+            }
+            if (replacementCol != -1) {
+                performPivot(i, replacementCol);
+            }
+        }
+    }
+
+    // KHỞI TẠO PHA 2: Khôi phục hàm mục tiêu gốc.
     iterationCount = 0;
 
+    for (int j = 0; j <= cols; ++j) tableau[m][j] = 0.0;
     for (int j = 0; j < n_slack; ++j) {
         tableau[m][j] = lp.c[j];
     }
-    // Phạt biến giả (loại nó khỏi quá trình tối ưu)
-    tableau[m][a_col] = 1e9;
+    tableau[m][a_col] = 1e9; // Không cho x0 quay lại cơ sở
     tableau[m][cols] = lp.c_0;
 
-    // Biến đổi hàm mục tiêu mới để tương thích với các biến cơ sở hiện tại
+    // Canonical hóa hàng mục tiêu pha 2 theo cơ sở hiện tại.
     for (int i = 0; i < m; ++i) {
         int b_col = basicVariables[i];
-        double factor = tableau[m][b_col];
-        if (std::abs(factor) > CLEAN_EPS) {
-            for (int j = 0; j <= cols; ++j) {
-                tableau[m][j] -= factor * tableau[i][j];
+        if (b_col >= 0 && b_col <= cols) {
+            double factor = tableau[m][b_col];
+            if (std::abs(factor) > CLEAN_EPS) {
+                for (int j = 0; j <= cols; ++j) {
+                    tableau[m][j] -= factor * tableau[i][j];
+                    if (std::abs(tableau[m][j]) < CLEAN_EPS) tableau[m][j] = 0.0;
+                }
             }
         }
     }
 
     this->recordStep("Từ vựng 1 (Khởi tạo Pha 2)");
 
-    // Chạy Đơn hình cho Pha 2
-    bool success = this->runSimplexLoop();
+    bool success = this->runSimplexLoop(false);
 
-    // Xử lý logic tương tự như solve() ở trên (Kiểm tra vô số nghiệm vs nghiệm ảo)
     if (success) {
         if (this->checkAlternativeOptima()) {
             this->firstSolution = this->getSolution();
             findAndRecordAlternativeOptimum();
 
-            // KIỂM TRA NGHIỆM ẢO ĐỂ QUYẾT ĐỊNH STATUS
             bool isReallyDifferent = false;
             for (size_t i = 0; i < firstSolution.size(); ++i) {
                 if (std::abs(firstSolution[i] - altSolution[i]) > CLEAN_EPS) {
@@ -490,6 +593,7 @@ bool SimplexSolver::solveTwoPhase() {
     return success;
 }
 
+
 // Lưu lại trạng thái của mỗi bước lặp (để phục vụ tính năng hiển thị từng bước cho người dùng)
 void SimplexSolver::recordStep(const QString& name) {
     SimplexStep step;
@@ -508,8 +612,10 @@ bool SimplexSolver::checkAlternativeOptima() {
     // Bỏ qua các cột thuộc về các biến nội bộ (được sinh ra do tách biến tự do)
     std::set<int> ignoredCols;
     int internalIdx = 0;
-    for (size_t i = 0; i < lp.varBounds.size(); ++i) {
-        if (lp.varBounds[i].isFree || lp.varBounds[i].sign == "free") {
+    for (size_t i = 0; i < originalVarBounds.size(); ++i) {
+        if (originalVarBounds[i].isFree || originalVarBounds[i].sign == "free") {
+            // Không dùng riêng từng nửa x_i^+, x_i^- để kết luận vô số nghiệm,
+            // vì biến tự do được biểu diễn bởi hiệu của hai biến không âm.
             ignoredCols.insert(internalIdx);
             ignoredCols.insert(internalIdx + 1);
             internalIdx += 2;
@@ -538,8 +644,10 @@ void SimplexSolver::findAndRecordAlternativeOptimum() {
 
     std::set<int> ignoredCols;
     int internalIdx = 0;
-    for (size_t i = 0; i < lp.varBounds.size(); ++i) {
-        if (lp.varBounds[i].isFree || lp.varBounds[i].sign == "free") {
+    for (size_t i = 0; i < originalVarBounds.size(); ++i) {
+        if (originalVarBounds[i].isFree || originalVarBounds[i].sign == "free") {
+            // Không dùng riêng từng nửa x_i^+, x_i^- để kết luận vô số nghiệm,
+            // vì biến tự do được biểu diễn bởi hiệu của hai biến không âm.
             ignoredCols.insert(internalIdx);
             ignoredCols.insert(internalIdx + 1);
             internalIdx += 2;

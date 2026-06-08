@@ -32,6 +32,10 @@
 #include <QStandardPaths>
 #include <QCompleter>
 #include <QStringListModel>
+#include <QInputDialog>
+#include <QKeyEvent>
+#include <QEvent>
+#include <QTimer>
 
 // =======================================================================
 // Cấu trúc bọc bài toán kèm theo thời gian giải
@@ -39,6 +43,7 @@
 struct HistoryEntry {
     LinearProgram lp;
     QDateTime timestamp;
+    QString note; // Ghi chú riêng cho từng bài toán trong lịch sử
 };
 
 static std::deque<HistoryEntry> g_undoStack;
@@ -62,6 +67,7 @@ static void saveHistoryToJson() {
     for (const auto& entry : g_undoStack) {
         QJsonObject obj;
         obj["timestamp"] = entry.timestamp.toString(Qt::ISODate);
+        obj["note"] = entry.note;
 
         const LinearProgram& lp = entry.lp;
         obj["algoType"] = lp.algoType;
@@ -130,6 +136,7 @@ static void loadHistoryFromJson() {
         } else {
             entry.timestamp = QDateTime::currentDateTime();
         }
+        entry.note = obj["note"].toString();
 
         LinearProgram lp;
         lp.algoType = obj["algoType"].toInt();
@@ -272,7 +279,42 @@ public:
         this->setText(QString::number(val, 'f', 2));
     }
 
+    // [FIX TAB ĐIỀU HƯỚNG]
+    // Dùng riêng cho ô hệ số cuối cùng của hàm mục tiêu:
+    // khi người dùng nhấn Tab, focus sẽ nhảy thẳng xuống ô hệ số đầu tiên của bảng ràng buộc.
+    void setCustomTabTarget(QWidget *target) {
+        customTabTarget = target;
+    }
+
 protected:
+    bool event(QEvent *event) override {
+        // [FIX TAB ĐIỀU HƯỚNG - TRIỆT ĐỂ]
+        // Qt thường xử lý phím Tab ở tầng event/focus traversal trước khi vào keyPressEvent,
+        // nên phải chặn trực tiếp tại event() để đảm bảo đang đứng ở ô x_n của hàm mục tiêu
+        // thì Tab luôn nhảy xuống ô đầu tiên của bảng ràng buộc.
+        if (event->type() == QEvent::KeyPress && customTabTarget) {
+            QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+            if (keyEvent->key() == Qt::Key_Tab &&
+                keyEvent->modifiers() == Qt::NoModifier) {
+                this->setValue(this->value());
+
+                customTabTarget->setFocus(Qt::TabFocusReason);
+                if (QLineEdit *targetInput = qobject_cast<QLineEdit*>(customTabTarget)) {
+                    targetInput->selectAll();
+                }
+
+                event->accept();
+                return true;
+            }
+        }
+
+        return QLineEdit::event(event);
+    }
+
+    void keyPressEvent(QKeyEvent *event) override {
+        QLineEdit::keyPressEvent(event);
+    }
+
     void focusInEvent(QFocusEvent *event) override {
         QLineEdit::focusInEvent(event);
         QTimer::singleShot(0, this, [this](){ this->selectAll(); });
@@ -290,7 +332,131 @@ protected:
         this->selectAll();
         event->accept();
     }
+
+private:
+    QWidget *customTabTarget = nullptr;
 };
+
+// -----------------------------------------------------------------------
+// [FIX TAB CHO QCOMBOBOX]
+// QComboBox đôi khi tự xử lý phím Tab trước khi setTabOrder có hiệu lực,
+// đặc biệt khi nằm trong QTableWidget::cellWidget.
+// Vì vậy tạo ComboBox riêng để ép Tab đi đúng target mong muốn.
+// -----------------------------------------------------------------------
+class TabComboBox : public QComboBox {
+public:
+    explicit TabComboBox(QWidget *parent = nullptr) : QComboBox(parent) {
+        setFocusPolicy(Qt::StrongFocus);
+    }
+
+    void setCustomTabTarget(QWidget *target) {
+        customTabTarget = target;
+    }
+
+protected:
+    bool event(QEvent *event) override {
+        if (event->type() == QEvent::KeyPress && customTabTarget) {
+            QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+
+            if (keyEvent->key() == Qt::Key_Tab &&
+                keyEvent->modifiers() == Qt::NoModifier) {
+                customTabTarget->setFocus(Qt::TabFocusReason);
+
+                if (QLineEdit *targetInput = qobject_cast<QLineEdit*>(customTabTarget)) {
+                    targetInput->selectAll();
+                }
+
+                event->accept();
+                return true;
+            }
+        }
+
+        return QComboBox::event(event);
+    }
+
+private:
+    QWidget *customTabTarget = nullptr;
+};
+
+
+// =======================================================================
+// [FIX TAB ĐIỀU HƯỚNG]
+// Thiết lập luồng Tab thống nhất cho toàn bộ màn hình nhập liệu.
+// Luồng mong muốn:
+// - Ô cuối cùng hàm mục tiêu -> ô đầu tiên bảng ràng buộc.
+// - Ô b_i cuối cùng -> ô dấu biến đầu tiên.
+// - Các ô dấu biến đi dọc từ trên xuống.
+// - Ô dấu biến cuối cùng -> ô chọn phương pháp giải.
+// - Ô chọn phương pháp giải -> nút Solve.
+// =======================================================================
+static void setupInputTabOrder(Ui::Dashboard *ui) {
+    if (!ui) return;
+
+    int objLastCol = ui->table_functionTarget->columnCount() - 1;
+    if (objLastCol >= 0 && ui->matrix->rowCount() > 0 && ui->matrix->columnCount() > 0) {
+        QWidget *lastObjectiveCell = ui->table_functionTarget->cellWidget(0, objLastCol);
+        QWidget *firstConstraintCell = ui->matrix->cellWidget(0, 0);
+
+        if (lastObjectiveCell && firstConstraintCell) {
+            if (MathInput *lastInput = dynamic_cast<MathInput*>(lastObjectiveCell)) {
+                lastInput->setCustomTabTarget(firstConstraintCell);
+            }
+            QWidget::setTabOrder(lastObjectiveCell, firstConstraintCell);
+        }
+    }
+
+    int matrixRows = ui->matrix->rowCount();
+    int matrixCols = ui->matrix->columnCount();
+    if (matrixRows > 0 && matrixCols > 0 && ui->table_varConstraint->rowCount() > 0) {
+        QWidget *lastConstraintCell = ui->matrix->cellWidget(matrixRows - 1, matrixCols - 1);
+        QWidget *firstVarSignCell = ui->table_varConstraint->cellWidget(0, 1);
+
+        if (lastConstraintCell && firstVarSignCell) {
+            if (MathInput *lastInput = dynamic_cast<MathInput*>(lastConstraintCell)) {
+                lastInput->setCustomTabTarget(firstVarSignCell);
+            }
+            QWidget::setTabOrder(lastConstraintCell, firstVarSignCell);
+        }
+    }
+
+    int varRows = ui->table_varConstraint->rowCount();
+    for (int row = 0; row < varRows; ++row) {
+        QWidget *currentVarSignCell = ui->table_varConstraint->cellWidget(row, 1);
+        if (!currentVarSignCell) continue;
+
+        currentVarSignCell->setFocusPolicy(Qt::StrongFocus);
+
+        if (row + 1 < varRows) {
+            QWidget *nextVarSignCell = ui->table_varConstraint->cellWidget(row + 1, 1);
+            if (nextVarSignCell) {
+                nextVarSignCell->setFocusPolicy(Qt::StrongFocus);
+
+                // Ép Tab ở combo hiện tại xuống combo dòng kế tiếp.
+                if (TabComboBox *currentCombo = dynamic_cast<TabComboBox*>(currentVarSignCell)) {
+                    currentCombo->setCustomTabTarget(nextVarSignCell);
+                }
+
+                QWidget::setTabOrder(currentVarSignCell, nextVarSignCell);
+            }
+        } else {
+            if (ui->comboAlgorithm) {
+                ui->comboAlgorithm->setFocusPolicy(Qt::StrongFocus);
+
+                // Ép Tab ở combo cuối cùng nhảy sang ô phương pháp giải.
+                if (TabComboBox *currentCombo = dynamic_cast<TabComboBox*>(currentVarSignCell)) {
+                    currentCombo->setCustomTabTarget(ui->comboAlgorithm);
+                }
+
+                QWidget::setTabOrder(currentVarSignCell, ui->comboAlgorithm);
+            }
+
+            if (ui->comboAlgorithm && ui->pushButton_3) {
+                ui->pushButton_3->setFocusPolicy(Qt::StrongFocus);
+                QWidget::setTabOrder(ui->comboAlgorithm, ui->pushButton_3);
+            }
+        }
+    }
+}
 
 Dashboard::Dashboard(QWidget *parent)
     : QMainWindow(parent)
@@ -336,7 +502,7 @@ Dashboard::Dashboard(QWidget *parent)
 
             QDialog historyDialog(this);
             historyDialog.setWindowTitle("Lịch sử giải bài toán");
-            historyDialog.resize(680, 450);
+            historyDialog.resize(820, 520);
 
             // [FIX LINUX] Đọc settings từ AppData để HĐH Linux không bị lỗi Read-only
             QString iniPath = getAppDataPath() + "/settings.ini";
@@ -379,7 +545,7 @@ Dashboard::Dashboard(QWidget *parent)
             layout->addWidget(lblTitle);
 
             QLineEdit *searchEdit = new QLineEdit(&historyDialog);
-            searchEdit->setPlaceholderText("🔎 Tìm theo hàm mục tiêu, ngày (dd/MM/yyyy), giờ (HH:mm:ss)...");
+            searchEdit->setPlaceholderText("🔎 Tìm theo hàm mục tiêu, ngày (dd/MM/yyyy), giờ (HH:mm:ss), ghi chú...");
             layout->addWidget(searchEdit);
 
             QListWidget *listWidget = new QListWidget(&historyDialog);
@@ -423,12 +589,21 @@ Dashboard::Dashboard(QWidget *parent)
                 else if (lp_item.algoType == 2) algoName = "2 Pha";
                 else algoName = "Tự động";
 
-                return QString("   ▶ [%1] : [%2] | %3 Biến, %4 Ràng buộc | %5")
-                    .arg(itemTime)
-                    .arg(buildObjectiveExpression(lp_item))
-                    .arg(vars)
-                    .arg(constraints)
-                    .arg(algoName);
+                QString noteText = entry.note.trimmed();
+                QString notePart = noteText.isEmpty() ? "" : " | 📝 " + noteText;
+
+                // [NOTE HISTORY UI]
+                // Ghi chú được hiển thị ngay sát bên phải cột/phần "Phương pháp giải"
+                // để người dùng đọc cùng một dòng, không tạo thêm dòng lớn bên dưới.
+                QString description = QString("   ▶ [%1] : [%2] | %3 Biến, %4 Ràng buộc | %5%6")
+                                          .arg(itemTime)
+                                          .arg(buildObjectiveExpression(lp_item))
+                                          .arg(vars)
+                                          .arg(constraints)
+                                          .arg(algoName)
+                                          .arg(notePart);
+
+                return description;
             };
 
             auto buildSearchText = [&](const HistoryEntry& entry) -> QString {
@@ -437,8 +612,8 @@ Dashboard::Dashboard(QWidget *parent)
                 QString time1 = entry.timestamp.time().toString("HH:mm:ss");
                 QString time2 = entry.timestamp.time().toString("HH:mm");
 
-                return QString("%1 %2 %3 %4 %5")
-                    .arg(date1, date2, time1, time2, buildHistoryDescription(entry));
+                return QString("%1 %2 %3 %4 %5 %6")
+                    .arg(date1, date2, time1, time2, buildHistoryDescription(entry), entry.note);
             };
 
             QStringListModel *suggestionModel = new QStringListModel(&historyDialog);
@@ -460,6 +635,9 @@ Dashboard::Dashboard(QWidget *parent)
                     suggestions << entry.timestamp.date().toString("yyyy-MM-dd");
                     suggestions << entry.timestamp.time().toString("HH:mm:ss");
                     suggestions << buildHistoryDescription(entry).trimmed();
+                    if (!entry.note.trimmed().isEmpty()) {
+                        suggestions << entry.note.trimmed();
+                    }
                 }
                 suggestions.removeDuplicates();
                 suggestionModel->setStringList(suggestions);
@@ -526,10 +704,14 @@ Dashboard::Dashboard(QWidget *parent)
 
                     QListWidgetItem *item = new QListWidgetItem(buildHistoryDescription(entry));
                     item->setData(Qt::UserRole, i);
+                    item->setToolTip(buildHistoryDescription(entry));
 
                     // BẬT CHECKBOX CHO TỪNG DÒNG
                     item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
                     item->setCheckState(Qt::Unchecked);
+
+                    // Ghi chú đã nằm cùng dòng với phương pháp giải nên giữ chiều cao gọn.
+                    item->setSizeHint(QSize(item->sizeHint().width(), 44));
 
                     listWidget->addItem(item);
                     visibleCount++;
@@ -569,6 +751,7 @@ Dashboard::Dashboard(QWidget *parent)
             btnLayout->setSpacing(8);
             QPushButton *btnClearAll = new QPushButton("🗑 Xóa tất cả", &historyDialog);
             QPushButton *btnDelete = new QPushButton("❌ Xóa mục chọn", &historyDialog);
+            QPushButton *btnNote = new QPushButton("📝 Ghi chú", &historyDialog);
             QPushButton *btnRestore = new QPushButton("Tải lại dữ liệu", &historyDialog);
             QPushButton *btnCancel = new QPushButton("Hủy bỏ", &historyDialog);
 
@@ -576,28 +759,32 @@ Dashboard::Dashboard(QWidget *parent)
                 btnCancel->setStyleSheet("QPushButton { background-color: #313244; color: #CDD6F4; border: 1px solid #45475A; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #45475A; }");
                 btnDelete->setStyleSheet("QPushButton { background-color: #F38BA8; color: #1E1E2E; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #EBA0AC; }");
                 btnClearAll->setStyleSheet("QPushButton { background-color: #F38BA8; color: #1E1E2E; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #EBA0AC; }");
+                btnNote->setStyleSheet("QPushButton { background-color: #F9E2AF; color: #1E1E2E; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #F5C2E7; }");
                 btnRestore->setStyleSheet("QPushButton { background-color: #89B4FA; color: #1E1E2E; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #B4BEFE; }");
             } else {
                 btnCancel->setStyleSheet("QPushButton { background-color: #FFFFFF; color: #4B5563; border: 1px solid #D1D5DB; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #F3F4F6; }");
                 btnDelete->setStyleSheet("QPushButton { background-color: #D32F2F; color: #FFFFFF; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #B71C1C; }");
                 btnClearAll->setStyleSheet("QPushButton { background-color: #D32F2F; color: #FFFFFF; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #B71C1C; }");
+                btnNote->setStyleSheet("QPushButton { background-color: #F59E0B; color: #FFFFFF; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #D97706; }");
                 btnRestore->setStyleSheet("QPushButton { background-color: #0078D7; color: #FFFFFF; border: none; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #005A9E; }");
             }
 
             btnCancel->setCursor(Qt::PointingHandCursor);
             btnDelete->setCursor(Qt::PointingHandCursor);
             btnClearAll->setCursor(Qt::PointingHandCursor);
+            btnNote->setCursor(Qt::PointingHandCursor);
             btnRestore->setCursor(Qt::PointingHandCursor);
 
             // Ép các nút trong hộp thoại lịch sử có cùng kích thước
-            QList<QPushButton*> historyButtons = {btnClearAll, btnDelete, btnCancel, btnRestore};
+            QList<QPushButton*> historyButtons = {btnClearAll, btnDelete, btnNote, btnCancel, btnRestore};
             for (QPushButton *btn : historyButtons) {
-                btn->setFixedSize(155, 38);
+                btn->setFixedSize(145, 38);
             }
 
             // Bố trí nút xóa sang trái, 2 nút kia sang phải
             btnLayout->addWidget(btnClearAll);
             btnLayout->addWidget(btnDelete);
+            btnLayout->addWidget(btnNote);
             btnLayout->addStretch();
             btnLayout->addWidget(btnCancel);
             btnLayout->addWidget(btnRestore);
@@ -686,6 +873,61 @@ Dashboard::Dashboard(QWidget *parent)
 
                 return checkedIndexes;
             };
+
+            auto handleNote = [&]() {
+                std::vector<int> checkedIndexes = getCheckedHistoryIndexes();
+                int noteIndex = -1;
+
+                if (checkedIndexes.size() > 1) {
+                    QMessageBox::warning(
+                        &historyDialog,
+                        "Thông báo",
+                        "Bạn chỉ được chọn 1 bài toán để ghi chú.\n"
+                        "Vui lòng bỏ chọn các bài toán còn lại."
+                        );
+                    return;
+                }
+
+                if (checkedIndexes.size() == 1) {
+                    noteIndex = checkedIndexes[0];
+                } else {
+                    QListWidgetItem *selectedItem = listWidget->currentItem();
+                    if (!selectedItem || selectedItem->data(Qt::UserRole).toInt() == -1) {
+                        QMessageBox::warning(&historyDialog, "Thông báo", "Vui lòng chọn một bài toán để ghi chú.");
+                        return;
+                    }
+                    noteIndex = selectedItem->data(Qt::UserRole).toInt();
+                }
+
+                if (noteIndex < 0 || noteIndex >= (int)g_undoStack.size()) return;
+
+                bool ok = false;
+                QString oldNote = g_undoStack[noteIndex].note;
+                QString newNote = QInputDialog::getMultiLineText(
+                    &historyDialog,
+                    "Ghi chú bài toán",
+                    "Nhập ghi chú cho bài toán đã chọn:",
+                    oldNote,
+                    &ok
+                    );
+
+                if (!ok) return;
+
+                g_undoStack[noteIndex].note = newNote.trimmed();
+                saveHistoryToJson();
+                refreshSuggestions();
+                populateList();
+
+                // Giữ lại focus ở bài toán vừa ghi chú nếu nó còn đang hiển thị.
+                for (int row = 0; row < listWidget->count(); ++row) {
+                    QListWidgetItem *item = listWidget->item(row);
+                    if (item && item->data(Qt::UserRole).toInt() == noteIndex) {
+                        listWidget->setCurrentRow(row);
+                        break;
+                    }
+                }
+            };
+            connect(btnNote, &QPushButton::clicked, &historyDialog, handleNote);
 
             auto handleRestore = [&]() {
                 std::vector<int> checkedIndexes = getCheckedHistoryIndexes();
@@ -779,13 +1021,14 @@ Dashboard::Dashboard(QWidget *parent)
 
                         auto *spinVarVal = dynamic_cast<MathInput*>(ui->table_varConstraint->cellWidget(i, 2));
                         if (spinVarVal) {
-                            if (lp.varBounds[i].sign == "free" || lp.varBounds[i].isFree) {
-                                spinVarVal->setValue(0.0);
-                                spinVarVal->setEnabled(false);
-                            } else {
-                                spinVarVal->setEnabled(true);
-                                spinVarVal->setValue(lp.varBounds[i].value);
-                            }
+                            // [FIX HISTORY RESTORE]
+                            // Cột thứ 3 "Giá trị" của bảng ràng buộc dấu luôn phải đóng/khóa,
+                            // kể cả khi tải lại bài toán từ lịch sử.
+                            // Tránh trường hợp khi sign là >= hoặc <= thì ô này tự bật/mở lại.
+                            spinVarVal->setValue(0.0);
+                            spinVarVal->setReadOnly(true);
+                            spinVarVal->setEnabled(false);
+                            spinVarVal->clearFocus();
                         }
                     }
                 }
@@ -833,9 +1076,21 @@ void Dashboard::setupObjectiveFunctionTable(int n) {
     for (int i = 0; i <= n; i++) {
         MathInput *spinBox = createSpinBox();
         if (i < (int)oldData.size()) spinBox->setValue(oldData[i]);
+
+        // [FIX TAB ĐIỀU HƯỚNG]
+        // Ô cuối cùng của hàm mục tiêu là hệ số của biến x_n.
+        // Khi nhấn Tab tại ô này, chuyển focus xuống ô đầu tiên của bảng ràng buộc.
+        if (i == n && ui->matrix->rowCount() > 0 && ui->matrix->columnCount() > 0) {
+            spinBox->setCustomTabTarget(ui->matrix->cellWidget(0, 0));
+        }
+
         ui->table_functionTarget->setCellWidget(0, i, spinBox);
     }
     ui->table_functionTarget->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+
+    // [FIX TAB ĐIỀU HƯỚNG]
+    // Sau khi tạo bảng hàm mục tiêu, cập nhật lại toàn bộ luồng Tab.
+    setupInputTabOrder(ui);
 }
 
 void Dashboard::setupConstraintsTable(int m, int n) {
@@ -884,6 +1139,10 @@ void Dashboard::setupConstraintsTable(int m, int n) {
         ui->matrix->setCellWidget(row, n + 1, spB);
     }
     ui->matrix->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+
+    // [FIX TAB ĐIỀU HƯỚNG]
+    // Sau khi tạo bảng ràng buộc, cập nhật lại luồng Tab.
+    setupInputTabOrder(ui);
 }
 
 void Dashboard::setupNumericCell(int row, int col) {
@@ -910,7 +1169,8 @@ void Dashboard::setupVariableConstraints(int n) {
         labelVar->setAlignment(Qt::AlignCenter);
         ui->table_varConstraint->setCellWidget(i, 0, labelVar);
 
-        QComboBox *comboSign = new QComboBox();
+        TabComboBox *comboSign = new TabComboBox();
+        comboSign->setFocusPolicy(Qt::StrongFocus);
         comboSign->addItems({">=", "<=", "free"});
         if (i < oldN) {
             int idx = comboSign->findText(oldSigns[i]);
@@ -931,6 +1191,11 @@ void Dashboard::setupVariableConstraints(int n) {
                 });
     }
     ui->table_varConstraint->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+
+    // [FIX TAB ĐIỀU HƯỚNG]
+    // Sau khi tạo bảng ràng buộc dấu biến, cập nhật lại luồng Tab:
+    // dấu biến đi dọc xuống, ô cuối sang phương pháp giải, rồi sang Solve.
+    setupInputTabOrder(ui);
 }
 
 void Dashboard::on_pushButton_4_clicked()
@@ -1009,9 +1274,13 @@ void Dashboard::on_pushButton_3_clicked()
     newEntry.lp = local_lp;
     newEntry.timestamp = QDateTime::currentDateTime();
 
+    // Nếu bài toán được tải từ lịch sử rồi Solve lại, giữ nguyên ghi chú cũ.
+    QString preservedNote;
     if (g_pendingRestoreIndex >= 0 && g_pendingRestoreIndex < (int)g_undoStack.size()) {
+        preservedNote = g_undoStack[g_pendingRestoreIndex].note;
         g_undoStack.erase(g_undoStack.begin() + g_pendingRestoreIndex);
     }
+    newEntry.note = preservedNote;
     g_pendingRestoreIndex = -1;
 
     if (g_undoStack.size() >= 10000) {
@@ -1217,17 +1486,22 @@ void Dashboard::on_btn_HuongDan_clicked()
         &nbsp;&nbsp;&nbsp;&bull; Chọn thuật toán muốn sử dụng ở thanh menu thả xuống.<br>
         &nbsp;&nbsp;&nbsp;&bull; Nhấn nút <b style="color: #0078D7;">Solve</b> để xem chi tiết lời giải từng bước.</p>
 
-        <p style="margin-bottom: 12px;"><b>6. Sử dụng chức năng Lịch sử:</b><br>
+        <p style="margin-bottom: 12px;"><b>6. Sử dụng chức năng Lịch sử và Ghi chú:</b><br>
         &nbsp;&nbsp;&nbsp;&bull; Sau mỗi lần nhấn <b style="color: #0078D7;">Solve</b> và bài toán được giải thành công, phần mềm sẽ tự động lưu bài toán vào <b>Lịch sử</b>.<br>
         &nbsp;&nbsp;&nbsp;&bull; Nhấn nút <b>Lịch sử</b> để mở danh sách các bài toán đã giải trước đó.<br>
-        &nbsp;&nbsp;&nbsp;&bull; Mỗi bài toán trong lịch sử sẽ hiển thị <b>thời gian giải</b>, <b>dạng bài toán Max/Min</b>, <b>hàm mục tiêu</b>, <b>số biến</b> và <b>số ràng buộc</b>.</p>
+        &nbsp;&nbsp;&nbsp;&bull; Mỗi bài toán trong lịch sử sẽ hiển thị <b>thời gian giải</b>, <b>dạng Max/Min</b>, <b>hàm mục tiêu</b>, <b>số biến</b>, <b>số ràng buộc</b> và <b>phương pháp giải</b>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Để thêm ghi chú, chọn một bài toán trong danh sách rồi nhấn <b style="color: #0078D7;">Ghi chú</b>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Người dùng có thể nhập nội dung như: <i>bài quan trọng</i>, <i>cần kiểm tra lại</i>, <i>vô số nghiệm</i>, <i>bài kiểm tra cuối kỳ</i>...<br>
+        &nbsp;&nbsp;&nbsp;&bull; Sau khi lưu, ghi chú sẽ hiển thị ngay bên phải phần <b>phương pháp giải</b> của bài toán, ví dụ: <code style="color: #0078D7;">| 2 Pha | 📝 cần xem lại</code>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Nếu bài toán được tải lại từ lịch sử rồi giải lại, ghi chú cũ vẫn được giữ để tránh mất thông tin.</p>
 
         <p style="margin-bottom: 12px;"><b>7. Tìm kiếm bài toán cũ trong Lịch sử:</b><br>
-        &nbsp;&nbsp;&nbsp;&bull; Người dùng có thể nhập từ khóa vào ô tìm kiếm để tìm lại bài toán cũ nhanh hơn.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Người dùng nhập từ khóa vào ô tìm kiếm để lọc nhanh các bài toán đã lưu.<br>
         &nbsp;&nbsp;&nbsp;&bull; Có thể tìm theo <b>hàm mục tiêu</b>, ví dụ: <code style="color: #0078D7;">Max Z</code>, <code style="color: #0078D7;">1x1 - 1x2</code>.<br>
-        &nbsp;&nbsp;&nbsp;&bull; Có thể tìm theo <b>ngày</b>, ví dụ: <code style="color: #0078D7;">06/06/2026</code>.<br>
-        &nbsp;&nbsp;&nbsp;&bull; Có thể tìm theo <b>giờ</b>, ví dụ: <code style="color: #0078D7;">14:07:49</code>.<br>
-        &nbsp;&nbsp;&nbsp;&bull; Khi nhập từ khóa, phần mềm sẽ tự động gợi ý các bài toán phù hợp để người dùng chọn nhanh hơn.</p>
+        &nbsp;&nbsp;&nbsp;&bull; Có thể tìm theo <b>ngày</b>, ví dụ: <code style="color: #0078D7;">06/06/2026</code> hoặc <code style="color: #0078D7;">2026-06-06</code>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Có thể tìm theo <b>giờ</b>, ví dụ: <code style="color: #0078D7;">14:07:49</code> hoặc <code style="color: #0078D7;">14:07</code>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Có thể tìm trực tiếp theo <b>nội dung ghi chú</b>, ví dụ: <code style="color: #0078D7;">bài kiểm tra</code>, <code style="color: #0078D7;">vô số nghiệm</code>, <code style="color: #0078D7;">cần xem lại</code>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Khi nhập từ khóa, phần mềm sẽ tự động gợi ý cả <b>bài toán</b> và <b>ghi chú</b> phù hợp để người dùng chọn nhanh hơn.</p>
 
         <p style="margin-bottom: 12px;"><b>8. Tải lại một bài toán từ Lịch sử:</b><br>
         &nbsp;&nbsp;&nbsp;&bull; Chọn một bài toán trong danh sách, sau đó nhấn <b style="color: #0078D7;">Tải lại dữ liệu</b> để đưa dữ liệu bài toán đó trở lại màn hình nhập liệu.<br>
@@ -1243,6 +1517,17 @@ void Dashboard::on_btn_HuongDan_clicked()
         &nbsp;&nbsp;&nbsp;&bull; Để xóa một hoặc nhiều bài toán, tích chọn các bài toán cần xóa rồi nhấn <b style="color: #D9534F;">Xóa mục chọn</b>.<br>
         &nbsp;&nbsp;&nbsp;&bull; Để xóa toàn bộ lịch sử, nhấn <b style="color: #D9534F;">Xóa tất cả</b>.<br>
         &nbsp;&nbsp;&nbsp;&bull; Khi xóa lịch sử, phần mềm sẽ hỏi xác nhận trước khi thực hiện để tránh xóa nhầm dữ liệu.</p>
+
+        <p style="margin-bottom: 12px;"><b>11. Sử dụng cửa sổ Kết quả / WdSolve:</b><br>
+        &nbsp;&nbsp;&nbsp;&bull; Sau khi nhấn <b style="color: #0078D7;">Solve</b>, cửa sổ <b>Kết quả tính toán</b> sẽ hiển thị <b>giá trị tối ưu</b>, <b>nghiệm tối ưu</b> và <b>các bước thực thi</b> của thuật toán.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Khu vực <b>Nghiệm tối ưu</b> cho biết giá trị của từng biến. Nếu bài toán có <b>vô số nghiệm</b>, phần mềm sẽ hiển thị thêm tập nghiệm hoặc hướng nghiệm tối ưu để người dùng dễ theo dõi.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Tab <b>[w, x, z] HIỂN THỊ DẠNG TỪ VỰNG</b> dùng để xem lời giải theo từng từ vựng, gồm biến vào, biến ra, phép xoay, kết luận và các giải thích kèm theo.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Tab <b>HIỂN THỊ DẠNG BẢNG</b> dùng để xem các bước giải theo dạng bảng đơn hình, phù hợp khi muốn kiểm tra hệ số, dòng trụ và cột trụ rõ hơn.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Nhấn <b>Biểu diễn hình học</b> để xem miền nghiệm và điểm tối ưu trên đồ thị. Chức năng này chỉ hỗ trợ cho bài toán có <b>2 biến</b>.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Nhấn <b>Hỏi/Đáp</b> để mở Chatbot hỗ trợ giải thích bài toán, cách đọc từ vựng, ý nghĩa nghiệm tối ưu và các bước biến đổi. Nếu chưa có API Key, gõ <code style="color: #0078D7;">/key</code> trong cửa sổ chat để cài đặt.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Tích chọn <b>Xem lời giải ở dạng PDF</b> rồi nhấn <b>OK</b> để mở cửa sổ xem lời giải.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Trong cửa sổ xem lời giải với PDF, người dùng có thể nhấn <b>Tải xuống PDF</b> để lưu hoặc nhấn <b>Tải xuống .tex</b> để lấy file XeLaTeX phục vụ chỉnh sửa, biên dịch hoặc nộp báo cáo.<br>
+        &nbsp;&nbsp;&nbsp;&bull; Nhấn <b>OK</b> nếu chỉ muốn đóng cửa sổ kết quả và quay lại màn hình nhập liệu.</p>
 
         <p style="color: #666666; font-style: italic; margin-bottom: 15px;">* Nhấn nút <b>Reset</b> (mũi tên xoay) để dọn dẹp bảng và nhập bài toán mới.</p>
 
