@@ -182,14 +182,20 @@ jobs:
 
         $warmup = @'
         \documentclass[12pt,a4paper]{article}
-        \usepackage[utf8]{inputenc}
-        \usepackage[T5]{fontenc}
+        \usepackage{fontspec}
         \usepackage[vietnamese]{babel}
         \usepackage{amsmath, geometry, array, amssymb, xcolor}
+        \IfFontExistsTF{TeX Gyre Termes}
+          {\setmainfont{TeX Gyre Termes}}
+          {\IfFontExistsTF{Times New Roman}
+             {\setmainfont{Times New Roman}}
+             {\setmainfont{Latin Modern Roman}}}
         \geometry{margin=1in}
+        \sloppy
+        \emergencystretch=2em
         \begin{document}
-        \section*{Kiểm tra tiếng Việt}
-        Giải bài toán quy hoạch tuyến tính.
+        \section*{Kiem tra tieng Viet}
+        Giai bai toan quy hoach tuyen tinh.
         \[
         \begin{array}{r c r c r l}
         -Z &=& 0.00 &+& x_{1}\\
@@ -410,14 +416,20 @@ jobs:
 
         cat > tectonic-warmup.tex <<'EOF'
         \documentclass[12pt,a4paper]{article}
-        \usepackage[utf8]{inputenc}
-        \usepackage[T5]{fontenc}
+        \usepackage{fontspec}
         \usepackage[vietnamese]{babel}
         \usepackage{amsmath, geometry, array, amssymb, xcolor}
+        \IfFontExistsTF{TeX Gyre Termes}
+          {\setmainfont{TeX Gyre Termes}}
+          {\IfFontExistsTF{Times New Roman}
+             {\setmainfont{Times New Roman}}
+             {\setmainfont{Latin Modern Roman}}}
         \geometry{margin=1in}
+        \sloppy
+        \emergencystretch=2em
         \begin{document}
-        \section*{Kiểm tra tiếng Việt}
-        Giải bài toán quy hoạch tuyến tính.
+        \section*{Kiem tra tieng Viet}
+        Giai bai toan quy hoach tuyen tinh.
         \[
         \begin{array}{r c r c r l}
         -Z &=& 0.00 &+& x_{1}\\
@@ -687,14 +699,20 @@ jobs:
         mkdir -p "$SEED_CACHE"
         cat > tectonic-warmup.tex <<'EOF'
         \documentclass[12pt,a4paper]{article}
-        \usepackage[utf8]{inputenc}
-        \usepackage[T5]{fontenc}
+        \usepackage{fontspec}
         \usepackage[vietnamese]{babel}
         \usepackage{amsmath, geometry, array, amssymb, xcolor}
+        \IfFontExistsTF{TeX Gyre Termes}
+          {\setmainfont{TeX Gyre Termes}}
+          {\IfFontExistsTF{Times New Roman}
+             {\setmainfont{Times New Roman}}
+             {\setmainfont{Latin Modern Roman}}}
         \geometry{margin=1in}
+        \sloppy
+        \emergencystretch=2em
         \begin{document}
-        \section*{Kiểm tra tiếng Việt}
-        Giải bài toán quy hoạch tuyến tính.
+        \section*{Kiem tra tieng Viet}
+        Giai bai toan quy hoach tuyen tinh.
         \[
         \begin{array}{r c r c r l}
         -Z &=& 0.00 &+& x_{1}\\
