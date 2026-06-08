@@ -685,7 +685,11 @@ WdSolve::WdSolve(QWidget *parent)
 
                 bool hasVarTerms = false;
                 for (int j : nonBasicVars) {
-                    double coeff = -step.matrix[isZRow ? m : i][j];
+                    // [FIX PDF/TEX MAX -> MIN(-Z)]
+                    // Dòng hàm mục tiêu phải lấy dấu giống bảng "Các bước thực thi".
+                    // Với bài toán Max, thuật toán hiển thị dưới dạng Min(-Z), nên hệ số ở dòng -Z
+                    // phải dùng trực tiếp step.matrix[m][j], không đảo dấu như các dòng ràng buộc.
+                    double coeff = isZRow ? step.matrix[m][j] : -step.matrix[i][j];
                     if (isZRow && stepIdx == 0 && isPhase1Loc && (varNames[j] == "x_0" || varNames[j] == "x0")) coeff = 1.0;
                     if (std::abs(coeff) >= 1e-9) hasVarTerms = true;
                 }
@@ -698,7 +702,11 @@ WdSolve::WdSolve(QWidget *parent)
                 bool isFirstRhsTerm = !hasConst;
 
                 for (int j : nonBasicVars) {
-                    double coeff = -step.matrix[isZRow ? m : i][j];
+                    // [FIX PDF/TEX MAX -> MIN(-Z)]
+                    // Dòng hàm mục tiêu phải lấy dấu giống bảng "Các bước thực thi".
+                    // Với bài toán Max, thuật toán hiển thị dưới dạng Min(-Z), nên hệ số ở dòng -Z
+                    // phải dùng trực tiếp step.matrix[m][j], không đảo dấu như các dòng ràng buộc.
+                    double coeff = isZRow ? step.matrix[m][j] : -step.matrix[i][j];
                     if (isZRow && stepIdx == 0 && isPhase1Loc && (varNames[j] == "x_0" || varNames[j] == "x0")) coeff = 1.0;
 
                     if (std::abs(coeff) < 1e-9) {
@@ -970,7 +978,11 @@ WdSolve::WdSolve(QWidget *parent)
 
                 bool hasVarTerms = false;
                 for (int j : nonBasicVars) {
-                    double coeff = -step.matrix[isZRow ? m : i][j];
+                    // [FIX PDF/TEX MAX -> MIN(-Z)]
+                    // Dòng hàm mục tiêu phải lấy dấu giống bảng "Các bước thực thi".
+                    // Với bài toán Max, thuật toán hiển thị dưới dạng Min(-Z), nên hệ số ở dòng -Z
+                    // phải dùng trực tiếp step.matrix[m][j], không đảo dấu như các dòng ràng buộc.
+                    double coeff = isZRow ? step.matrix[m][j] : -step.matrix[i][j];
                     if (isZRow && stepIdx == 0 && isPhase1Loc && (varNames[j] == "x_0" || varNames[j] == "x0")) coeff = 1.0;
                     if (std::abs(coeff) >= 1e-9) hasVarTerms = true;
                 }
@@ -982,7 +994,11 @@ WdSolve::WdSolve(QWidget *parent)
                 bool isFirstRhsTerm = !hasConst;
 
                 for (int j : nonBasicVars) {
-                    double coeff = -step.matrix[isZRow ? m : i][j];
+                    // [FIX PDF/TEX MAX -> MIN(-Z)]
+                    // Dòng hàm mục tiêu phải lấy dấu giống bảng "Các bước thực thi".
+                    // Với bài toán Max, thuật toán hiển thị dưới dạng Min(-Z), nên hệ số ở dòng -Z
+                    // phải dùng trực tiếp step.matrix[m][j], không đảo dấu như các dòng ràng buộc.
+                    double coeff = isZRow ? step.matrix[m][j] : -step.matrix[i][j];
                     if (isZRow && stepIdx == 0 && isPhase1Loc && (varNames[j] == "x_0" || varNames[j] == "x0")) coeff = 1.0;
 
                     if (std::abs(coeff) < 1e-9) {
