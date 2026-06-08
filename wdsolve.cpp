@@ -452,6 +452,39 @@ WdSolve::WdSolve(QWidget *parent)
         optSolHtml += ")"; optSolTex += ")";
         varListHtml += ")"; varListTex += ")";
 
+        // [FIX BÁO CÁO VÔ SỐ NGHIỆM]
+        // Tạo chuỗi điểm nghiệm để in tập lồi chứa các điểm tối ưu.
+        auto makePointHtml = [&](const std::vector<double>& values) -> QString {
+            if (values.empty()) return "";
+            QString s = "(";
+            size_t dim = currentOriginalLp.varBounds.size();
+            for (size_t i = 0; i < dim; ++i) {
+                double val = (i < values.size()) ? values[i] : 0.0;
+                s += formatVal(val);
+                if (i + 1 < dim) s += ", ";
+            }
+            s += ")";
+            return s;
+        };
+
+        auto makePointTex = [&](const std::vector<double>& values) -> QString {
+            if (values.empty()) return "";
+            QString s = "\\left(";
+            size_t dim = currentOriginalLp.varBounds.size();
+            for (size_t i = 0; i < dim; ++i) {
+                double val = (i < values.size()) ? values[i] : 0.0;
+                s += formatVal(val);
+                if (i + 1 < dim) s += ", ";
+            }
+            s += "\\right)";
+            return s;
+        };
+
+        QString firstPointHtml = makePointHtml(this->currentSolution);
+        QString secondPointHtml = makePointHtml(this->currentAltSolution);
+        QString firstPointTex = makePointTex(this->currentSolution);
+        QString secondPointTex = makePointTex(this->currentAltSolution);
+
         // ==========================================
         // 1. TẠO CHUỖI HTML ĐỂ RENDER PDF BÁO CÁO
         // ==========================================
@@ -760,7 +793,18 @@ WdSolve::WdSolve(QWidget *parent)
         html += "<p style='text-align: left; margin-bottom: 5px;'><b>Trạng thái:</b> " + reportStatus + "</p>";
         if (!zText.contains("Vô nghiệm", Qt::CaseInsensitive) && !zText.contains("Không giới nội", Qt::CaseInsensitive) && !zText.contains("Lỗi", Qt::CaseInsensitive)) {
             html += "<p style='text-align: left; margin-bottom: 5px;'><b>Giá trị tối ưu:</b> Z<sup>*</sup> = " + formatVal(z_opt) + "</p>";
-            html += "<p style='text-align: left; margin-bottom: 5px;'><b>Nghiệm tối ưu:</b> " + varListHtml + " = " + optSolHtml + "</p>";
+
+            if (zText.contains("Vô số nghiệm", Qt::CaseInsensitive) &&
+                !firstPointHtml.isEmpty() && !secondPointHtml.isEmpty()) {
+                html += "<p style='text-align: left; margin-bottom: 5px;'><b>Nghiệm tối ưu thứ nhất:</b> " + varListHtml + " = " + firstPointHtml + "</p>";
+                html += "<p style='text-align: left; margin-bottom: 5px;'><b>Nghiệm tối ưu thứ hai:</b> " + varListHtml + " = " + secondPointHtml + "</p>";
+                html += "<p style='text-align: left; margin-bottom: 5px;'><b>Tập lồi chứa các điểm tối ưu:</b> "
+                        "{ X(&lambda;) = &lambda;" + firstPointHtml +
+                        " + (1 - &lambda;)" + secondPointHtml +
+                        " | 0 &le; &lambda; &le; 1 }</p>";
+            } else {
+                html += "<p style='text-align: left; margin-bottom: 5px;'><b>Nghiệm tối ưu:</b> " + varListHtml + " = " + optSolHtml + "</p>";
+            }
         }
         html += "</body></html>";
 
@@ -789,7 +833,7 @@ WdSolve::WdSolve(QWidget *parent)
         tex += "\\usepackage[vietnamese]{babel}\n";
         tex += "\\usepackage{amsmath, geometry, array, amssymb, xcolor}\n";
 
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_WINDOWS) || defined(_WIN32)
         // [FIX WINDOWS FONT]
         // Trên Windows, Tectonic/XeTeX đôi khi lỗi khi fontspec mở font bằng đường dẫn tuyệt đối
         // kiểu C:/.../fonts/NotoSerif-Regular.ttf. Vì vậy Windows dùng font hệ thống trước.
@@ -1049,7 +1093,18 @@ WdSolve::WdSolve(QWidget *parent)
         tex += "\\noindent\\textbf{Trạng thái:} " + reportStatus + "\\\\[0.2cm]\n";
         if (!zText.contains("Vô nghiệm", Qt::CaseInsensitive) && !zText.contains("Không giới nội", Qt::CaseInsensitive) && !zText.contains("Lỗi", Qt::CaseInsensitive)) {
             tex += "\\noindent\\textbf{Giá trị tối ưu:} $Z^* = " + formatVal(z_opt) + "$\\\\[0.2cm]\n";
-            tex += "\\noindent\\textbf{Nghiệm tối ưu:} $" + varListTex + " = " + optSolTex + "$\n\n";
+
+            if (zText.contains("Vô số nghiệm", Qt::CaseInsensitive) &&
+                !firstPointTex.isEmpty() && !secondPointTex.isEmpty()) {
+                tex += "\\noindent\\textbf{Nghiệm tối ưu thứ nhất:} $" + varListTex + " = " + firstPointTex + "$\\\\[0.15cm]\n";
+                tex += "\\noindent\\textbf{Nghiệm tối ưu thứ hai:} $" + varListTex + " = " + secondPointTex + "$\\\\[0.15cm]\n";
+                tex += "\\noindent\\textbf{Tập lồi chứa các điểm tối ưu:} "
+                       "$\\left\\{ X(\\lambda) = \\lambda " + firstPointTex +
+                       " + (1-\\lambda) " + secondPointTex +
+                       " \\mid 0 \\le \\lambda \\le 1 \\right\\}$\n\n";
+            } else {
+                tex += "\\noindent\\textbf{Nghiệm tối ưu:} $" + varListTex + " = " + optSolTex + "$\n\n";
+            }
         }
         tex += "\\end{document}";
 
