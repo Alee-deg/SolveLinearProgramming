@@ -121,6 +121,66 @@ static QString findBundledLatexCompiler(bool* useTectonic)
     return "";
 }
 
+// =======================================================================
+// [FIX FONT PDF/LATEX]
+// Tìm thư mục font đóng gói kèm app. YAML mới sẽ đặt Noto Serif ở:
+// - Windows: tools/../fonts hoặc fonts cạnh file exe
+// - Linux/AppImage: $APPDIR/usr/share/fonts/phanmemqhtt
+// - macOS: .app/Contents/Resources/fonts
+// Nếu không tìm thấy font đóng gói, LaTeX sẽ fallback sang font hệ thống.
+// =======================================================================
+static QString findBundledReportFontDir()
+{
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QString appImageDir = qEnvironmentVariable("APPDIR");
+
+    QStringList candidates;
+    candidates << QDir(appDir).filePath("fonts");
+    candidates << QDir(appDir).filePath("../fonts");
+    candidates << QDir(appDir).filePath("../../fonts");
+
+    if (!appImageDir.isEmpty()) {
+        candidates << QDir(appImageDir).filePath("usr/share/fonts/phanmemqhtt");
+        candidates << QDir(appImageDir).filePath("usr/fonts");
+    }
+
+#ifdef Q_OS_MAC
+    candidates << QDir(appDir).filePath("../Resources/fonts");
+    candidates << QDir(appDir).filePath("../../Resources/fonts");
+#endif
+
+    for (const QString& candidate : candidates) {
+        QDir dir(QDir::cleanPath(candidate));
+        if (dir.exists("NotoSerif-Regular.ttf") &&
+            dir.exists("NotoSerif-Bold.ttf") &&
+            dir.exists("NotoSerif-Italic.ttf") &&
+            dir.exists("NotoSerif-BoldItalic.ttf")) {
+            QString path = dir.absolutePath();
+            path.replace("\\", "/");
+            if (!path.endsWith('/')) path += "/";
+            return path;
+        }
+    }
+
+    return "";
+}
+
+static QString escapeLatexText(const QString& input)
+{
+    QString s = input;
+    s.replace("\\", "\\textbackslash{}");
+    s.replace("&", "\\&");
+    s.replace("%", "\\%");
+    s.replace("$", "\\$");
+    s.replace("#", "\\#");
+    s.replace("_", "\\_");
+    s.replace("{", "\\{");
+    s.replace("}", "\\}");
+    s.replace("~", "\\textasciitilde{}");
+    s.replace("^", "\\textasciicircum{}");
+    return s;
+}
+
 static bool exportHtmlPdfFallback(const QString& fileName, const QString& html)
 {
     if (fileName.isEmpty()) return false;
@@ -712,15 +772,27 @@ WdSolve::WdSolve(QWidget *parent)
         };
 
         QString tex = "\\documentclass[12pt,a4paper]{article}\n";
-        // [FIX TECTONIC CROSS-OS]
-        // Không dùng fontspec/setmainfont trong file PDF tự động vì trên Windows/macOS/Linux
-        // Tectonic có thể quét font hệ thống và sinh rất nhiều cảnh báo absolute path,
-        // thậm chí làm quá trình biên dịch kém ổn định khi đóng gói.
-        // Bộ dưới đây dùng font LaTeX chuẩn, hỗ trợ tiếng Việt qua T5 và hoạt động ổn định hơn với Tectonic.
-        tex += "\\usepackage[utf8]{inputenc}\n";
-        tex += "\\usepackage[T5]{fontenc}\n";
+        // [FIX FONT PDF/LATEX]
+        // Dùng fontspec + font Unicode để tiếng Việt không bị lỗi dấu trong PDF.
+        // Nếu YAML đã đóng gói Noto Serif, LaTeX dùng trực tiếp font trong app.
+        // Nếu thiếu font đóng gói, fallback sang font hệ thống phổ biến.
+        QString bundledFontDir = findBundledReportFontDir();
+        tex += "\\usepackage{fontspec}\n";
         tex += "\\usepackage[vietnamese]{babel}\n";
         tex += "\\usepackage{amsmath, geometry, array, amssymb, xcolor}\n";
+        if (!bundledFontDir.isEmpty()) {
+            tex += "\\setmainfont{NotoSerif}[\n";
+            tex += "  Path={" + bundledFontDir + "},\n";
+            tex += "  UprightFont=*-Regular.ttf,\n";
+            tex += "  BoldFont=*-Bold.ttf,\n";
+            tex += "  ItalicFont=*-Italic.ttf,\n";
+            tex += "  BoldItalicFont=*-BoldItalic.ttf\n";
+            tex += "]\n";
+        } else {
+            tex += "\\IfFontExistsTF{Noto Serif}{\\setmainfont{Noto Serif}}{\n";
+            tex += "\\IfFontExistsTF{DejaVu Serif}{\\setmainfont{DejaVu Serif}}{\n";
+            tex += "\\IfFontExistsTF{Times New Roman}{\\setmainfont{Times New Roman}}{\\setmainfont{Arial Unicode MS}}}}\n";
+        }
         tex += "\\geometry{margin=1in}\n";
         tex += "\\sloppy\n";
         tex += "\\emergencystretch=2em\n";
