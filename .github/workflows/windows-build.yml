@@ -4,6 +4,9 @@ on:
   push:
     branches: [ master, main, Algorithm_of_Hau ]
 
+permissions:
+  contents: read
+
 jobs:
   # ================================================================
   # WINDOWS
@@ -48,7 +51,6 @@ jobs:
 
         New-Item -ItemType Directory -Force -Path $outDir
 
-        # Copy exe
         if (Test-Path "build\SolveLinearProgramming.exe") {
           Copy-Item "build\SolveLinearProgramming.exe" "$outDir\"
         } else {
@@ -56,13 +58,11 @@ jobs:
         }
         Write-Host "[OK] exe"
 
-        # Copy file settings.ini vào thư mục build_result
         if (Test-Path "settings.ini") {
           Copy-Item "settings.ini" "$outDir\"
           Write-Host "[OK] settings.ini"
         }
 
-        # Qt6 DLLs
         $qtDlls = @(
           "Qt6Core.dll","Qt6Gui.dll","Qt6Widgets.dll",
           "Qt6Network.dll","Qt6PrintSupport.dll",
@@ -74,29 +74,24 @@ jobs:
           else { Write-Host "[SKIP] $dll" }
         }
 
-        # platforms
         New-Item -ItemType Directory -Force -Path "$outDir\platforms"
         Copy-Item "$qtPlugin\platforms\qwindows.dll" "$outDir\platforms\"
 
-        # styles
         New-Item -ItemType Directory -Force -Path "$outDir\styles"
         if (Test-Path "$qtPlugin\styles\qwindowsvistastyle.dll") {
           Copy-Item "$qtPlugin\styles\qwindowsvistastyle.dll" "$outDir\styles\"
         }
 
-        # iconengines
         New-Item -ItemType Directory -Force -Path "$outDir\iconengines"
         foreach ($f in Get-ChildItem "$qtPlugin\iconengines\*.dll" -ErrorAction SilentlyContinue) {
           Copy-Item $f.FullName "$outDir\iconengines\"
         }
 
-        # imageformats
         New-Item -ItemType Directory -Force -Path "$outDir\imageformats"
         foreach ($f in Get-ChildItem "$qtPlugin\imageformats\*.dll" -ErrorAction SilentlyContinue) {
           Copy-Item $f.FullName "$outDir\imageformats\"
         }
 
-        # platformthemes
         if (Test-Path "$qtPlugin\platformthemes") {
           New-Item -ItemType Directory -Force -Path "$outDir\platformthemes"
           foreach ($f in Get-ChildItem "$qtPlugin\platformthemes\*.dll" -ErrorAction SilentlyContinue) {
@@ -104,7 +99,6 @@ jobs:
           }
         }
 
-        # tls
         if (Test-Path "$qtPlugin\tls") {
           New-Item -ItemType Directory -Force -Path "$outDir\tls"
           foreach ($f in Get-ChildItem "$qtPlugin\tls\*.dll" -ErrorAction SilentlyContinue) {
@@ -112,24 +106,20 @@ jobs:
           }
         }
 
-        # OpenSSL
         foreach ($dll in @("libssl-3-x64.dll","libcrypto-3-x64.dll","libssl-1_1-x64.dll","libcrypto-1_1-x64.dll")) {
           foreach ($src in @("$qtBin\$dll","$mingwBin\$dll","C:\Program Files\Git\mingw64\bin\$dll")) {
             if (Test-Path $src) { Copy-Item $src "$outDir\"; Write-Host "[OK] $dll"; break }
           }
         }
 
-        # MinGW runtime
         foreach ($dll in @("libgcc_s_seh-1.dll","libstdc++-6.dll","libwinpthread-1.dll")) {
           $src = Join-Path $mingwBin $dll
           if (Test-Path $src) { Copy-Item $src "$outDir\"; Write-Host "[OK] $dll" }
           else { Write-Host "[WARN] $dll not found" }
         }
 
-        # qt.conf
         @("[Paths]","Prefix = .","Plugins = .") | Set-Content "$outDir\qt.conf"
 
-        # DPI manifest
         @(
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
           '<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">',
@@ -144,17 +134,26 @@ jobs:
 
         Write-Host "[OK] Windows deploy done"
 
-
-    - name: 4.1. Đóng gói Tectonic cho Windows (.tex -> PDF)
+    - name: 4.1. Đóng gói Tectonic và cache LaTeX cho Windows
       shell: pwsh
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         $ErrorActionPreference = "Stop"
         $outDir = "build_result"
         $toolsDir = Join-Path $outDir "tools"
+        $cacheDir = Join-Path $outDir "tectonic-cache"
         New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+        New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+
+        $headers = @{
+          "Accept" = "application/vnd.github+json"
+          "User-Agent" = "PhanMemQHTT-GitHub-Actions"
+          "Authorization" = "Bearer $env:GITHUB_TOKEN"
+        }
 
         Write-Host "[INFO] Download latest Tectonic for Windows..."
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/tectonic-typesetting/tectonic/releases/latest"
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/tectonic-typesetting/tectonic/releases/latest" -Headers $headers
         $asset = $release.assets |
           Where-Object { $_.name -match "x86_64-pc-windows-msvc.*\.zip$" } |
           Select-Object -First 1
@@ -165,7 +164,9 @@ jobs:
           exit 1
         }
 
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "tectonic-windows.zip"
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "tectonic-windows.zip" -Headers @{
+          "User-Agent" = "PhanMemQHTT-GitHub-Actions"
+        }
         Expand-Archive -Path "tectonic-windows.zip" -DestinationPath "tectonic-windows" -Force
 
         $tectonicExe = Get-ChildItem -Path "tectonic-windows" -Recurse -Filter "tectonic.exe" |
@@ -178,12 +179,46 @@ jobs:
 
         Copy-Item $tectonicExe.FullName (Join-Path $toolsDir "tectonic.exe") -Force
         & (Join-Path $toolsDir "tectonic.exe") --version
+
+        $warmup = @'
+        \documentclass[12pt,a4paper]{article}
+        \usepackage[utf8]{inputenc}
+        \usepackage[T5]{fontenc}
+        \usepackage[vietnamese]{babel}
+        \usepackage{amsmath, geometry, array, amssymb, xcolor}
+        \geometry{margin=1in}
+        \begin{document}
+        \section*{Kiểm tra tiếng Việt}
+        Giải bài toán quy hoạch tuyến tính.
+        \[
+        \begin{array}{r c r c r l}
+        -Z &=& 0.00 &+& x_{1}\\
+        \hline
+        w_{1} &=& 1.00 &-& x_{1}
+        \end{array}
+        \]
+        \textcolor{red}{w_1} \quad \textcolor{green!50!black}{x_1}
+        \end{document}
+        '@
+
+        $warmupPath = "tectonic-warmup.tex"
+        $warmupOut = "tectonic-warmup-out"
+        New-Item -ItemType Directory -Force -Path $warmupOut | Out-Null
+        $warmup | Set-Content -Path $warmupPath -Encoding UTF8
+        $env:TECTONIC_CACHE_DIR = (Resolve-Path $cacheDir).Path
+
+        & (Join-Path $toolsDir "tectonic.exe") --chatter minimal --outdir $warmupOut $warmupPath
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "[ERROR] Warm-up Tectonic cache failed"
+          exit 1
+        }
+
         Write-Host "[OK] Bundled Tectonic: $toolsDir\tectonic.exe"
+        Write-Host "[OK] Preloaded Tectonic cache: $cacheDir"
 
     - name: 5. Cài đặt NSIS
       shell: pwsh
       run: |
-        # NSIS có sẵn trên GitHub runner, chỉ cần confirm path
         $nsisPath = "C:\Program Files (x86)\NSIS\makensis.exe"
         if (-not (Test-Path $nsisPath)) {
           choco install nsis -y --no-progress
@@ -213,12 +248,13 @@ jobs:
           'Section "Run"',
           '  SetOutPath "$INSTDIR"',
           '  File /r "build_result\*.*"',
+          '  System::Call ''Kernel32::SetEnvironmentVariable(t "TECTONIC_CACHE_DIR", t "$INSTDIR\tectonic-cache")i.r0''',
+          '  System::Call ''Kernel32::SetEnvironmentVariable(t "PATH", t "$INSTDIR\tools;$%PATH%")i.r1''',
           '  ExecWait ''"$INSTDIR\SolveLinearProgramming.exe"''',
           '  RMDir /r "$INSTDIR"',
           'SectionEnd'
         ) | Set-Content -Path "installer.nsi" -Encoding UTF8
 
-        # Build installer
         $nsisPath = "C:\Program Files (x86)\NSIS\makensis.exe"
         & $nsisPath "installer.nsi"
 
@@ -278,6 +314,8 @@ jobs:
         cmake --build build --parallel 2
 
     - name: 5. Deploy - Tạo AppImage
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
         wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
@@ -287,21 +325,28 @@ jobs:
         mkdir -p AppDir/usr/lib
         mkdir -p AppDir/usr/share/applications
         mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+        mkdir -p AppDir/usr/bin/tools
+        mkdir -p AppDir/usr/share/tectonic-cache
 
-        # [FIX LINUX WAF] Copy OpenSSL vào trong AppImage để không bị lỗi HTTPS
         cp -L /usr/lib/x86_64-linux-gnu/libssl.so* AppDir/usr/lib/ 2>/dev/null || true
         cp -L /usr/lib/x86_64-linux-gnu/libcrypto.so* AppDir/usr/lib/ 2>/dev/null || true
 
         cp build/SolveLinearProgramming AppDir/usr/bin/
 
-        # [Tectonic] Copy trình biên dịch LaTeX gọn nhẹ vào AppImage
-        # Ưu tiên bản MUSL để giảm phụ thuộc thư viện hệ thống của máy người dùng.
-        mkdir -p AppDir/usr/bin/tools
         python3 <<'PY'
-        import json, re, tarfile, urllib.request, pathlib, sys
+        import json, re, tarfile, urllib.request, pathlib, sys, os
+
+        token = os.environ.get("GITHUB_TOKEN", "")
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "PhanMemQHTT-GitHub-Actions",
+        }
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
 
         api = "https://api.github.com/repos/tectonic-typesetting/tectonic/releases/latest"
-        release = json.load(urllib.request.urlopen(api))
+        req = urllib.request.Request(api, headers=headers)
+        release = json.load(urllib.request.urlopen(req))
         assets = release.get("assets", [])
 
         def pick(patterns):
@@ -336,21 +381,64 @@ jobs:
             print("[ERROR] Không tìm thấy binary tectonic", file=sys.stderr)
             sys.exit(1)
 
-        target = pathlib.Path("AppDir/usr/bin/tools/tectonic")
+        target = pathlib.Path("AppDir/usr/bin/tools/tectonic.bin")
         target.write_bytes(candidates[0].read_bytes())
         target.chmod(0o755)
-        print("[OK] Bundled Tectonic:", target)
+        print("[OK] Bundled Tectonic binary:", target)
         PY
-        chmod +x AppDir/usr/bin/tools/tectonic
-        AppDir/usr/bin/tools/tectonic --version
 
+        cat > AppDir/usr/bin/tools/tectonic <<'EOF'
+        #!/usr/bin/env bash
+        DIR="$(cd "$(dirname "$0")" && pwd)"
+        SEED_DIR="$DIR/../../share/tectonic-cache"
+        CACHE_BASE="${XDG_CACHE_HOME:-$HOME/.cache}"
+        USER_CACHE="$CACHE_BASE/PhanMemQHTT/tectonic-cache"
+
+        mkdir -p "$USER_CACHE"
+
+        if [ -d "$SEED_DIR" ] && [ ! -f "$USER_CACHE/.phanmemqhtt_seeded" ]; then
+          cp -R "$SEED_DIR"/. "$USER_CACHE"/ 2>/dev/null || true
+          touch "$USER_CACHE/.phanmemqhtt_seeded" 2>/dev/null || true
+        fi
+
+        export TECTONIC_CACHE_DIR="$USER_CACHE"
+        exec "$DIR/tectonic.bin" "$@"
+        EOF
+
+        chmod +x AppDir/usr/bin/tools/tectonic AppDir/usr/bin/tools/tectonic.bin
+        AppDir/usr/bin/tools/tectonic.bin --version
+
+        cat > tectonic-warmup.tex <<'EOF'
+        \documentclass[12pt,a4paper]{article}
+        \usepackage[utf8]{inputenc}
+        \usepackage[T5]{fontenc}
+        \usepackage[vietnamese]{babel}
+        \usepackage{amsmath, geometry, array, amssymb, xcolor}
+        \geometry{margin=1in}
+        \begin{document}
+        \section*{Kiểm tra tiếng Việt}
+        Giải bài toán quy hoạch tuyến tính.
+        \[
+        \begin{array}{r c r c r l}
+        -Z &=& 0.00 &+& x_{1}\\
+        \hline
+        w_{1} &=& 1.00 &-& x_{1}
+        \end{array}
+        \]
+        \textcolor{red}{w_1} \quad \textcolor{green!50!black}{x_1}
+        \end{document}
+        EOF
+
+        export TECTONIC_CACHE_DIR="$PWD/AppDir/usr/share/tectonic-cache"
+        mkdir -p tectonic-warmup-out
+        AppDir/usr/bin/tools/tectonic.bin --chatter minimal --outdir tectonic-warmup-out tectonic-warmup.tex
+        echo "[OK] Preloaded Tectonic cache into AppImage"
 
         if [ -f "settings.ini" ]; then
           cp settings.ini AppDir/usr/bin/
           echo "[OK] Copied settings.ini"
         fi
 
-        # [ĐÃ FIX LẠI LỖI HEREDOC] Chuyển về dùng echo để tránh IDE báo lỗi đỏ và gãy cú pháp YAML
         echo "[Desktop Entry]" > AppDir/usr/share/applications/SolveLinearProgramming.desktop
         echo "Name=Giải Quy Hoạch Tuyến Tính" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
         echo "Exec=SolveLinearProgramming" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
@@ -358,7 +446,6 @@ jobs:
         echo "Type=Application" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
         echo "Categories=Education;Science;" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
 
-        # Icon
         if [ -f "resources/icon.png" ]; then
           cp resources/icon.png \
              AppDir/usr/share/icons/hicolor/256x256/apps/SolveLinearProgramming.png
@@ -377,7 +464,6 @@ jobs:
         echo "Plugins = plugins" >> AppDir/usr/bin/qt.conf
         echo "Libraries = lib" >> AppDir/usr/bin/qt.conf
 
-        # Copy Qt plugins bổ sung
         QT_PLUGIN_SRC="$Qt6_DIR/plugins"
         QT_PLUGIN_DST="AppDir/usr/plugins"
 
@@ -400,10 +486,9 @@ jobs:
         echo 'export PATH="$APPDIR/usr/bin/tools:$APPDIR/usr/bin:$PATH"' >> AppDir/usr/bin/SolveLinearProgramming
         echo 'export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"' >> AppDir/usr/bin/SolveLinearProgramming
         echo 'exec "$APPDIR/usr/bin/SolveLinearProgramming.bin" "$@"' >> AppDir/usr/bin/SolveLinearProgramming
-        
+
         chmod +x AppDir/usr/bin/SolveLinearProgramming
 
-        # Build AppImage
         export QMAKE="$Qt6_DIR/bin/qmake"
         export OUTPUT="PhanMemQHTT-Linux-x86_64.AppImage"
         export LINUXDEPLOY_OUTPUT_VERSION=""
@@ -412,7 +497,6 @@ jobs:
           --plugin qt \
           --output appimage
 
-        # Kiểm tra output
         if [ -f "PhanMemQHTT-Linux-x86_64.AppImage" ]; then
           echo "[OK] $(ls -lh PhanMemQHTT-Linux-x86_64.AppImage)"
         else
@@ -466,12 +550,13 @@ jobs:
         cmake --build build --parallel 3
 
     - name: 4. Deploy - macdeployqt + tạo DMG
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         APP_NAME="SolveLinearProgramming"
         OUT_DIR="build_result"
         mkdir -p "$OUT_DIR"
 
-        # Tìm .app bundle
         APP_BUNDLE="build/${APP_NAME}.app"
         if [ ! -d "$APP_BUNDLE" ]; then
           APP_BUNDLE=$(find build -name "*.app" -type d | head -1)
@@ -480,7 +565,7 @@ jobs:
 
         if [ -z "$APP_BUNDLE" ] || [ ! -d "$APP_BUNDLE" ]; then
           echo "[ERROR] Không tìm thấy .app bundle!"
-          find build -type f -name "*.app" 2>/dev/null
+          find build -type d -name "*.app" 2>/dev/null
           exit 1
         fi
 
@@ -489,7 +574,6 @@ jobs:
           echo "[OK] Copied settings.ini"
         fi
 
-        # Copy QtPrintSupport trước macdeployqt
         mkdir -p "$APP_BUNDLE/Contents/Frameworks"
         if [ -d "$Qt6_DIR/lib/QtPrintSupport.framework" ]; then
           cp -R "$Qt6_DIR/lib/QtPrintSupport.framework" \
@@ -497,13 +581,9 @@ jobs:
           echo "[OK] QtPrintSupport copied"
         fi
 
-        # macdeployqt
         "$Qt6_DIR/bin/macdeployqt" "$APP_BUNDLE" -verbose=1
         echo "[OK] macdeployqt done"
 
-        # [Tectonic] Đóng gói trình biên dịch LaTeX vào .app
-        # Tải cả arm64 và x86_64 nếu có, sau đó tạo script launcher tools/tectonic
-        # để app chạy đúng trên cả Apple Silicon và Intel.
         TOOLS_DIR="$APP_BUNDLE/Contents/Resources/tools"
         export TOOLS_DIR
         mkdir -p "$TOOLS_DIR"
@@ -511,8 +591,17 @@ jobs:
         python3 <<'PY'
         import json, re, tarfile, urllib.request, pathlib, sys, shutil, os
 
+        token = os.environ.get("GITHUB_TOKEN", "")
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "PhanMemQHTT-GitHub-Actions",
+        }
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
         api = "https://api.github.com/repos/tectonic-typesetting/tectonic/releases/latest"
-        release = json.load(urllib.request.urlopen(api))
+        req = urllib.request.Request(api, headers=headers)
+        release = json.load(urllib.request.urlopen(req))
         assets = release.get("assets", [])
 
         targets = {
@@ -563,6 +652,20 @@ jobs:
         cat > "$TOOLS_DIR/tectonic" <<'EOF'
         #!/bin/bash
         DIR="$(cd "$(dirname "$0")" && pwd)"
+        SEED_DIR="$DIR/../tectonic-cache"
+
+        if [ -z "$TECTONIC_CACHE_DIR" ]; then
+          USER_CACHE="$HOME/Library/Caches/PhanMemQHTT/tectonic-cache"
+          mkdir -p "$USER_CACHE"
+
+          if [ -d "$SEED_DIR" ] && [ ! -f "$USER_CACHE/.phanmemqhtt_seeded" ]; then
+            cp -R "$SEED_DIR"/. "$USER_CACHE"/ 2>/dev/null || true
+            touch "$USER_CACHE/.phanmemqhtt_seeded" 2>/dev/null || true
+          fi
+
+          export TECTONIC_CACHE_DIR="$USER_CACHE"
+        fi
+
         ARCH="$(uname -m)"
         if [ "$ARCH" = "arm64" ] && [ -x "$DIR/tectonic-arm64" ]; then
           exec "$DIR/tectonic-arm64" "$@"
@@ -576,21 +679,46 @@ jobs:
         echo "No bundled tectonic binary found" >&2
         exit 127
         EOF
+
         chmod +x "$TOOLS_DIR/tectonic" "$TOOLS_DIR"/tectonic-* 2>/dev/null || true
         "$TOOLS_DIR/tectonic" --version
-        echo "[OK] Tectonic bundled into macOS app"
 
-        # Re-sign (ad-hoc) để macOS không chặn
+        SEED_CACHE="$APP_BUNDLE/Contents/Resources/tectonic-cache"
+        mkdir -p "$SEED_CACHE"
+        cat > tectonic-warmup.tex <<'EOF'
+        \documentclass[12pt,a4paper]{article}
+        \usepackage[utf8]{inputenc}
+        \usepackage[T5]{fontenc}
+        \usepackage[vietnamese]{babel}
+        \usepackage{amsmath, geometry, array, amssymb, xcolor}
+        \geometry{margin=1in}
+        \begin{document}
+        \section*{Kiểm tra tiếng Việt}
+        Giải bài toán quy hoạch tuyến tính.
+        \[
+        \begin{array}{r c r c r l}
+        -Z &=& 0.00 &+& x_{1}\\
+        \hline
+        w_{1} &=& 1.00 &-& x_{1}
+        \end{array}
+        \]
+        \textcolor{red}{w_1} \quad \textcolor{green!50!black}{x_1}
+        \end{document}
+        EOF
+
+        export TECTONIC_CACHE_DIR="$SEED_CACHE"
+        mkdir -p tectonic-warmup-out
+        "$TOOLS_DIR/tectonic" --chatter minimal --outdir tectonic-warmup-out tectonic-warmup.tex
+        echo "[OK] Preloaded Tectonic cache into macOS app"
+
         codesign --force --deep -s - "$APP_BUNDLE"
         echo "[OK] Re-signed"
 
-        # Staging folder để tránh lỗi "Resource busy"
         DMG_STAGING="dmg_staging"
         mkdir -p "$DMG_STAGING"
         cp -R "$APP_BUNDLE" "$DMG_STAGING/"
         sync && sleep 2
 
-        # Tạo DMG
         hdiutil create \
           -volname "Giai QHTT" \
           -srcfolder "$DMG_STAGING" \
