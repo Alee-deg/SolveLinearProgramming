@@ -23,6 +23,11 @@
 #include <QProcessEnvironment>
 #include <QTemporaryDir>
 #include <QFileInfo>
+#include <QFileDevice>
+#include <QProgressDialog>
+#include <QTimer>
+#include <QPointer>
+#include <QTextStream>
 #include <QCoreApplication>
 #include <cmath>
 
@@ -46,12 +51,13 @@ static bool readDarkModeSetting()
     return appDirSettings.value("dark_mode", false).toBool();
 }
 
+
 // =======================================================================
 // [FIX TECTONIC CROSS-PLATFORM]
-// Tìm trình biên dịch LaTeX theo đúng cấu trúc đóng gói trong file YAML:
-// - Windows:  <app>/tools/tectonic.exe
-// - Linux:    <app>/tools/tectonic hoặc <AppImage>/usr/bin/tools/tectonic
-// - macOS:    <app>.app/Contents/Resources/tools/tectonic
+// Tìm trình biên dịch LaTeX đúng với cấu trúc đóng gói trong YAML:
+// - Windows: tools/tectonic.exe
+// - Linux/AppImage: usr/bin/tools/tectonic hoặc tools/tectonic
+// - macOS: Contents/Resources/tools/tectonic
 // Nếu không có Tectonic đi kèm thì fallback sang PATH hệ thống.
 // =======================================================================
 static bool ensureExecutablePermission(const QString& filePath)
@@ -87,41 +93,37 @@ static QString findLatexCompilerForPackagedApp(bool* useTectonic)
     const QString xelatexName  = "xelatex";
 #endif
 
-    QStringList baseDirs;
+    QStringList candidates;
     const QString appDir = QCoreApplication::applicationDirPath();
-    baseDirs << appDir;
-
-    // AppImage thường có biến APPDIR. Wrapper trong YAML cũng đặt tool ở usr/bin/tools.
     const QString appImageDir = QString::fromLocal8Bit(qgetenv("APPDIR"));
-    if (!appImageDir.isEmpty()) {
-        baseDirs << appImageDir
-                 << QDir(appImageDir).filePath("usr/bin")
-                 << QDir(appImageDir).filePath("usr");
-    }
+
+    // Windows: <app>/tools/tectonic.exe
+    // Linux non-AppImage: <app>/tools/tectonic
+    candidates << QDir::cleanPath(QDir(appDir).filePath("tools/" + tectonicName))
+               << QDir::cleanPath(QDir(appDir).filePath(tectonicName));
 
 #ifdef Q_OS_MAC
-    // Khi chạy trong .app: applicationDirPath() = Contents/MacOS
-    baseDirs << QDir(appDir).filePath("../Resources")
-             << QDir(appDir).filePath("../Resources/tools");
+    // macOS bundle: <App>.app/Contents/Resources/tools/tectonic
+    candidates << QDir::cleanPath(QDir(appDir).filePath("../Resources/tools/" + tectonicName))
+               << QDir::cleanPath(QDir(appDir).filePath("../Resources/" + tectonicName));
 #endif
-
-    QStringList tectonicCandidates;
-    for (const QString& base : baseDirs) {
-        tectonicCandidates
-            << QDir::cleanPath(QDir(base).filePath("tools/" + tectonicName))
-            << QDir::cleanPath(QDir(base).filePath(tectonicName));
-    }
 
 #ifdef Q_OS_LINUX
-    // Đúng với AppDir trong YAML: AppDir/usr/bin/tools/tectonic
-    tectonicCandidates
-        << QDir::cleanPath(QDir(appDir).filePath("tools/" + tectonicName))
-        << QDir::cleanPath(QDir(appDir).filePath("../bin/tools/" + tectonicName))
-        << QDir::cleanPath(QDir(appDir).filePath("../usr/bin/tools/" + tectonicName));
+    // AppImage/AppDir theo YAML: AppDir/usr/bin/tools/tectonic
+    candidates << QDir::cleanPath(QDir(appDir).filePath("tools/" + tectonicName))
+               << QDir::cleanPath(QDir(appDir).filePath("../bin/tools/" + tectonicName));
+
+    if (!appImageDir.isEmpty()) {
+        candidates << QDir::cleanPath(QDir(appImageDir).filePath("usr/bin/tools/" + tectonicName))
+                   << QDir::cleanPath(QDir(appImageDir).filePath("usr/bin/" + tectonicName))
+                   << QDir::cleanPath(QDir(appImageDir).filePath("tools/" + tectonicName));
+    }
 #endif
 
-    // Ưu tiên Tectonic đóng gói kèm app trước để chạy ổn định trên máy người dùng.
-    for (const QString& candidate : tectonicCandidates) {
+    candidates.removeDuplicates();
+
+    // Ưu tiên Tectonic đóng gói kèm app.
+    for (const QString& candidate : candidates) {
         if (ensureExecutablePermission(candidate)) {
             if (useTectonic) {
                 *useTectonic = true;
@@ -130,24 +132,45 @@ static QString findLatexCompilerForPackagedApp(bool* useTectonic)
         }
     }
 
-    QString tectonicFromPath = QStandardPaths::findExecutable(tectonicName);
-    if (!tectonicFromPath.isEmpty()) {
+    // Fallback PATH hệ thống.
+    QString compilerPath = QStandardPaths::findExecutable(tectonicName);
+    if (!compilerPath.isEmpty()) {
         if (useTectonic) {
             *useTectonic = true;
         }
-        return tectonicFromPath;
+        return compilerPath;
     }
 
-    // Chỉ fallback sang xelatex nếu máy người dùng đã cài TeX Live/MiKTeX/MacTeX.
-    QString xelatexFromPath = QStandardPaths::findExecutable(xelatexName);
-    if (!xelatexFromPath.isEmpty()) {
+    compilerPath = QStandardPaths::findExecutable(xelatexName);
+    if (!compilerPath.isEmpty()) {
         if (useTectonic) {
             *useTectonic = false;
         }
-        return xelatexFromPath;
+        return compilerPath;
     }
 
-    return "";
+    return QString();
+}
+
+static QProcessEnvironment buildLatexProcessEnvironment(const QString& compilerPath)
+{
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    const QString compilerDir = QFileInfo(compilerPath).absolutePath();
+    const QString oldPath = env.value("PATH");
+    const QString sep = QString(QDir::listSeparator());
+
+    if (!compilerDir.isEmpty() && !oldPath.startsWith(compilerDir)) {
+        env.insert("PATH", compilerDir + sep + oldPath);
+    }
+
+    const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    if (!cacheDir.isEmpty()) {
+        QDir().mkpath(cacheDir);
+        // Giúp Tectonic/Fontconfig có nơi ghi cache hợp lệ khi chạy trong AppImage/.app.
+        env.insert("XDG_CACHE_HOME", cacheDir);
+    }
+
+    return env;
 }
 
 WdSolve::WdSolve(QWidget *parent)
@@ -929,13 +952,27 @@ WdSolve::WdSolve(QWidget *parent)
             }
         });
 
-        connect(btnDownloadPdf, &QPushButton::clicked, previewDialog, [previewDialog, tex]() {
-            QString fileName = QFileDialog::getSaveFileName(previewDialog, "Lưu file PDF", "BaoCao_QHTT.pdf", "PDF Files (*.pdf)");
-            if (fileName.isEmpty()) return;
+        connect(btnDownloadPdf, &QPushButton::clicked, previewDialog, [previewDialog, tex, btnDownloadPdf]() {
+            QFileDialog saveDialog(previewDialog, "Lưu file PDF");
+            saveDialog.setAcceptMode(QFileDialog::AcceptSave);
+            saveDialog.setFileMode(QFileDialog::AnyFile);
+            saveDialog.setNameFilter("PDF Files (*.pdf)");
+            saveDialog.selectFile("BaoCao_QHTT.pdf");
+            saveDialog.setDefaultSuffix("pdf");
+            saveDialog.setOption(QFileDialog::DontUseNativeDialog, true);
+            if (saveDialog.exec() != QDialog::Accepted || saveDialog.selectedFiles().isEmpty()) {
+                return;
+            }
 
-            // [FIX PDF EXPORT CROSS-PLATFORM]
-            // File YAML đã đóng gói Tectonic trong thư mục tools/ của từng hệ điều hành.
-            // Vì vậy ưu tiên tìm Tectonic đi kèm app trước, sau đó mới fallback sang PATH hệ thống.
+            QString fileName = saveDialog.selectedFiles().first();
+            if (fileName.trimmed().isEmpty()) return;
+            if (!fileName.endsWith(".pdf", Qt::CaseInsensitive)) {
+                fileName += ".pdf";
+            }
+
+            // [FIX PDF EXPORT - KHÔNG TREO GIAO DIỆN]
+            // Không dùng waitForFinished() trên UI thread vì cả Windows/macOS/Linux sẽ báo Not Responding
+            // khi Tectonic tải bundle hoặc biên dịch lâu. Chạy QProcess bất đồng bộ và hiển thị tiến trình.
             bool useTectonic = false;
             QString compilerPath = findLatexCompilerForPackagedApp(&useTectonic);
 
@@ -943,22 +980,27 @@ WdSolve::WdSolve(QWidget *parent)
                 QMessageBox::warning(
                     previewDialog,
                     "Thiếu trình biên dịch LaTeX",
-                    "Không tìm thấy Tectonic đi kèm phần mềm hoặc xelatex trên máy.\n\n"
-                    "Vui lòng kiểm tra lại gói cài đặt: thư mục tools phải có tectonic tương ứng với hệ điều hành.\n"
-                    "Bạn vẫn có thể bấm 'Tải xuống .tex' để lưu file LaTeX và biên dịch thủ công."
+                    "Không tìm thấy Tectonic hoặc xelatex.\n\n"
+                    "Bản đóng gói nên đặt Tectonic theo đúng cấu trúc:\n"
+                    "- Windows: tools/tectonic.exe\n"
+                    "- Linux/AppImage: usr/bin/tools/tectonic\n"
+                    "- macOS: Contents/Resources/tools/tectonic\n\n"
+                    "Bạn vẫn có thể bấm 'Tải xuống .tex' để lưu file LaTeX."
                     );
                 return;
             }
 
-            QTemporaryDir tempDir;
-            if (!tempDir.isValid()) {
+            QTemporaryDir *tempDir = new QTemporaryDir(QDir::tempPath() + "/SolveLinearProgrammingLatex-XXXXXX");
+            if (!tempDir->isValid()) {
+                delete tempDir;
                 QMessageBox::critical(previewDialog, "Lỗi", "Không tạo được thư mục tạm để biên dịch PDF.");
                 return;
             }
 
-            QString texPath = tempDir.filePath("BaoCao_QHTT.tex");
+            QString texPath = tempDir->filePath("BaoCao_QHTT.tex");
             QFile texFile(texPath);
             if (!texFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                delete tempDir;
                 QMessageBox::critical(previewDialog, "Lỗi", "Không ghi được file LaTeX tạm.");
                 return;
             }
@@ -968,66 +1010,128 @@ WdSolve::WdSolve(QWidget *parent)
             out << tex;
             texFile.close();
 
-            QProcess process;
-            process.setWorkingDirectory(tempDir.path());
+            QProgressDialog *progress = new QProgressDialog(
+                "Đang biên dịch PDF từ LaTeX...\nLần đầu chạy Tectonic có thể mất lâu hơn vì cần chuẩn bị gói hỗ trợ.",
+                "Hủy", 0, 0, previewDialog);
+            progress->setWindowTitle("Đang xuất PDF");
+            progress->setWindowModality(Qt::WindowModal);
+            progress->setMinimumDuration(0);
+            progress->setAutoClose(false);
+            progress->setAutoReset(false);
+            progress->show();
 
-            // Đưa thư mục chứa compiler vào PATH để Tectonic đi kèm app hoạt động ổn định hơn.
-            QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-            QString compilerDir = QFileInfo(compilerPath).absolutePath();
-            QString oldPath = env.value("PATH");
-#ifdef Q_OS_WIN
-            env.insert("PATH", compilerDir + ";" + oldPath);
-#else
-            env.insert("PATH", compilerDir + ":" + oldPath);
-#endif
-            process.setProcessEnvironment(env);
+            btnDownloadPdf->setEnabled(false);
+
+            QProcess *process = new QProcess(previewDialog);
+            process->setWorkingDirectory(tempDir->path());
+            process->setProcessEnvironment(buildLatexProcessEnvironment(compilerPath));
 
             QStringList args;
             if (useTectonic) {
-                args << "--outdir" << tempDir.path() << texPath;
+                args << "--keep-logs" << "--outdir" << tempDir->path() << texPath;
             } else {
-                args << "-interaction=nonstopmode" << "-halt-on-error" << "BaoCao_QHTT.tex";
+                args << "-interaction=nonstopmode" << "-halt-on-error"
+                     << "-output-directory" << tempDir->path()
+                     << texPath;
             }
 
-            process.start(compilerPath, args);
-            if (!process.waitForStarted(5000)) {
-                QMessageBox::critical(previewDialog, "Lỗi", "Không khởi động được trình biên dịch LaTeX.");
+            QPointer<QDialog> dialogPtr(previewDialog);
+            QPointer<QPushButton> buttonPtr(btnDownloadPdf);
+            QPointer<QProgressDialog> progressPtr(progress);
+            QString *logBuffer = new QString;
+
+            QTimer *timeoutTimer = new QTimer(process);
+            timeoutTimer->setSingleShot(true);
+            timeoutTimer->setInterval(300000); // 5 phút, tránh app treo vô hạn nếu compiler bị kẹt.
+
+            QObject::connect(timeoutTimer, &QTimer::timeout, process, [process, progressPtr]() {
+                if (progressPtr) {
+                    progressPtr->setLabelText("Biên dịch quá lâu, đang dừng tiến trình...");
+                }
+                process->kill();
+            });
+
+            QObject::connect(progress, &QProgressDialog::canceled, process, [process]() {
+                process->kill();
+            });
+
+            QObject::connect(previewDialog, &QObject::destroyed, process, [process]() {
+                if (process->state() != QProcess::NotRunning) {
+                    process->kill();
+                }
+            });
+
+            QObject::connect(process, &QProcess::readyReadStandardOutput, process, [process, logBuffer, progressPtr]() {
+                *logBuffer += QString::fromUtf8(process->readAllStandardOutput());
+                if (logBuffer->size() > 12000) {
+                    *logBuffer = logBuffer->right(12000);
+                }
+                if (progressPtr) {
+                    progressPtr->setLabelText("Đang biên dịch PDF từ LaTeX...\nVui lòng chờ, ứng dụng vẫn đang hoạt động.");
+                }
+            });
+
+            QObject::connect(process, &QProcess::readyReadStandardError, process, [process, logBuffer]() {
+                *logBuffer += QString::fromUtf8(process->readAllStandardError());
+                if (logBuffer->size() > 12000) {
+                    *logBuffer = logBuffer->right(12000);
+                }
+            });
+
+            QObject::connect(process,
+                             QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                             process,
+                             [dialogPtr, buttonPtr, progressPtr, tempDir, logBuffer, process, fileName](int exitCode, QProcess::ExitStatus exitStatus) {
+                                 if (buttonPtr) buttonPtr->setEnabled(true);
+                                 if (progressPtr) progressPtr->hide();
+
+                                 QString pdfTempPath = tempDir->filePath("BaoCao_QHTT.pdf");
+                                 bool ok = (exitStatus == QProcess::NormalExit && exitCode == 0 && QFileInfo::exists(pdfTempPath));
+
+                                 if (!ok) {
+                                     if (dialogPtr) {
+                                         QMessageBox::critical(
+                                             dialogPtr,
+                                             "Lỗi biên dịch LaTeX",
+                                             "Không thể biên dịch file .tex thành PDF.\n\n"
+                                             "Ứng dụng không bị treo; tiến trình biên dịch đã kết thúc hoặc bị hủy.\n\n"
+                                             "Chi tiết lỗi:\n" + logBuffer->left(5000)
+                                             );
+                                     }
+                                 } else {
+                                     if (QFileInfo::exists(fileName)) {
+                                         QFile::remove(fileName);
+                                     }
+
+                                     if (!QFile::copy(pdfTempPath, fileName)) {
+                                         if (dialogPtr) {
+                                             QMessageBox::critical(dialogPtr, "Lỗi", "Không thể lưu file PDF vào vị trí đã chọn.");
+                                         }
+                                     } else if (dialogPtr) {
+                                         QMessageBox::information(dialogPtr, "Thành công", "Đã biên dịch và lưu thành công file PDF từ LaTeX!");
+                                     }
+                                 }
+
+                                 delete tempDir;
+                                 delete logBuffer;
+                                 process->deleteLater();
+                                 if (progressPtr) progressPtr->deleteLater();
+                             });
+
+            process->start(compilerPath, args);
+            if (!process->waitForStarted(1000)) {
+                // waitForStarted ngắn chỉ để bắt lỗi start tức thì, không đủ lâu để làm UI bị treo.
+                if (buttonPtr) buttonPtr->setEnabled(true);
+                if (progressPtr) progressPtr->hide();
+                QMessageBox::critical(previewDialog, "Lỗi", "Không khởi động được trình biên dịch LaTeX: " + process->errorString());
+                delete tempDir;
+                delete logBuffer;
+                process->deleteLater();
+                if (progressPtr) progressPtr->deleteLater();
                 return;
             }
 
-            if (!process.waitForFinished(120000)) {
-                process.kill();
-                process.waitForFinished();
-                QMessageBox::critical(previewDialog, "Lỗi", "Biên dịch LaTeX quá lâu hoặc bị treo.");
-                return;
-            }
-
-            QString pdfTempPath = tempDir.filePath("BaoCao_QHTT.pdf");
-            if (process.exitStatus() != QProcess::NormalExit ||
-                process.exitCode() != 0 ||
-                !QFileInfo::exists(pdfTempPath)) {
-                QString errorLog = QString::fromUtf8(process.readAllStandardError());
-                QString outputLog = QString::fromUtf8(process.readAllStandardOutput());
-
-                QMessageBox::critical(
-                    previewDialog,
-                    "Lỗi biên dịch LaTeX",
-                    "Không thể biên dịch file .tex thành PDF.\n\n"
-                    "Chi tiết lỗi:\n" + errorLog.left(2000) + "\n" + outputLog.left(2000)
-                    );
-                return;
-            }
-
-            if (QFileInfo::exists(fileName)) {
-                QFile::remove(fileName);
-            }
-
-            if (!QFile::copy(pdfTempPath, fileName)) {
-                QMessageBox::critical(previewDialog, "Lỗi", "Không thể lưu file PDF vào vị trí đã chọn.");
-                return;
-            }
-
-            QMessageBox::information(previewDialog, "Thành công", "Đã biên dịch và lưu thành công file PDF từ LaTeX!");
+            timeoutTimer->start();
         });
 
         previewDialog->exec();
