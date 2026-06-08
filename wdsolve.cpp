@@ -2219,4 +2219,12 @@ void WdSolve::on_pushButton_3_clicked()
     contextString += "\n--- HƯỚNG DẪN DÀNH CHO BẠN (TRỢ LÝ AI) ---\n";
     contextString += "Bạn là một AI hỗ trợ giải đáp toán học môn Quy hoạch tuyến tính. Bạn CHỈ được phép giải thích hoặc trả lời các câu hỏi liên quan đến nội dung bài toán quy hoạch tuyến tính ở trên, phương pháp giải, hoặc các khái niệm toán học liên quan.\n";
     contextString += "Khi giải thích hệ ràng buộc, bắt buộc phải dùng đúng dấu ràng buộc đã cung cấp trong từng dòng R1, R2, ... Không được tự đổi chiều dấu và không được bỏ mất vế phải.\n";
-    contextString += "QUAN TRỌNG: Nếu người dùng hỏi bất kỳ câu hỏi ngoài lề (không thuộc phạm vi của bài toán hoặc quy hoạch tuyến tính), bạn KHÔNG ĐƯỢC trả lời nội dung đó. Bạn BẮT BUỘC phải trả lời chính xác bằng câu sau và không gi
+    contextString += "QUAN TRỌNG: Nếu người dùng hỏi bất kỳ câu hỏi ngoài lề (không thuộc phạm vi của bài toán hoặc quy hoạch tuyến tính), bạn KHÔNG ĐƯỢC trả lời nội dung đó. Bạn BẮT BUỘC phải trả lời chính xác bằng câu sau và không giải thích gì thêm:\n\"Xin lỗi câu hỏi của bạn không thuộc phạm vi của bài toán\"";
+
+    if (!this->wd_ChatBot) this->wd_ChatBot = new WdChatBot(this);
+
+    this->wd_ChatBot->setProblemContext(contextString);
+    this->wd_ChatBot->show();
+    this->wd_ChatBot->raise();
+    this->wd_ChatBot->activateWindow();
+}
