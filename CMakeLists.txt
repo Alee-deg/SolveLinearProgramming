@@ -26,6 +26,13 @@ find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets PrintSupport Network S
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets PrintSupport Network Svg)
 
 # ======================================================================
+# App icon paths
+# ======================================================================
+set(APP_ICON_WIN "${CMAKE_CURRENT_SOURCE_DIR}/resources/images/logo.ico")
+set(APP_ICON_MAC "${CMAKE_CURRENT_SOURCE_DIR}/resources/images/logo.icns")
+set(APP_ICON_LINUX "${CMAKE_CURRENT_SOURCE_DIR}/resources/images/logo.png")
+
+# ======================================================================
 # Source files sau khi gom thư mục
 # ======================================================================
 set(PROJECT_SOURCES
@@ -63,33 +70,50 @@ set(PROJECT_SOURCES
 )
 
 # ======================================================================
-# Windows app icon
+# Windows icon
 # ======================================================================
-# Sau khi restructure, logo.ico đã nằm ở resources/images/logo.ico.
-# Nếu vẫn compile resources/app_icon.rc cũ, windres sẽ báo:
-#   can't open icon file `logo.ico`
-#
-# Cách dưới đây tạo app_icon_generated.rc trong thư mục build bằng đường dẫn
-# tuyệt đối tới logo.ico, nên không phụ thuộc working directory của windres.
-# Hoạt động ổn với GitHub Actions Windows + MinGW.
+# Windows cần file .rc để gắn icon vào file .exe.
+# Không dùng resources/app_icon.rc cố định nữa vì sau khi restructure path dễ sai.
+# CMake tự tạo app_icon_generated.rc bằng đường dẫn tuyệt đối tới logo.ico.
 if(WIN32)
-    set(APP_ICON_FILE "${CMAKE_CURRENT_SOURCE_DIR}/resources/images/logo.ico")
-
-    if(EXISTS "${APP_ICON_FILE}")
+    if(EXISTS "${APP_ICON_WIN}")
         set(GENERATED_APP_ICON_RC "${CMAKE_CURRENT_BINARY_DIR}/app_icon_generated.rc")
-
-        # Dùng path kiểu CMake với dấu "/" để windres đọc được trên Windows.
-        file(TO_CMAKE_PATH "${APP_ICON_FILE}" APP_ICON_FILE_FOR_RC)
+        file(TO_CMAKE_PATH "${APP_ICON_WIN}" APP_ICON_WIN_FOR_RC)
 
         file(WRITE "${GENERATED_APP_ICON_RC}"
-"#include <windows.h>\nIDI_ICON1 ICON DISCARDABLE \"${APP_ICON_FILE_FOR_RC}\"\n"
+"#include <windows.h>\nIDI_ICON1 ICON DISCARDABLE \"${APP_ICON_WIN_FOR_RC}\"\n"
         )
 
         list(APPEND PROJECT_SOURCES
             "${GENERATED_APP_ICON_RC}"
         )
     else()
-        message(WARNING "Không tìm thấy icon Windows: ${APP_ICON_FILE}. File .exe vẫn build được nhưng không có icon app.")
+        message(WARNING "Không tìm thấy Windows icon: ${APP_ICON_WIN}. File .exe vẫn build được nhưng không có icon.")
+    endif()
+endif()
+
+# ======================================================================
+# macOS icon
+# ======================================================================
+# macOS KHÔNG dùng .ico hoặc .rc. macOS bundle cần file .icns trong:
+#   SolveLinearProgramming.app/Contents/Resources/logo.icns
+#
+# Cần đặt file:
+#   resources/images/logo.icns
+#
+# Nếu chưa có logo.icns, tạo từ logo.png bằng iconutil trên macOS hoặc trong
+# GitHub Actions macOS job.
+if(APPLE)
+    if(EXISTS "${APP_ICON_MAC}")
+        set(MACOSX_BUNDLE_ICON_FILE "logo.icns")
+        set_source_files_properties("${APP_ICON_MAC}" PROPERTIES
+            MACOSX_PACKAGE_LOCATION "Resources"
+        )
+        list(APPEND PROJECT_SOURCES
+            "${APP_ICON_MAC}"
+        )
+    else()
+        message(WARNING "Không tìm thấy macOS icon: ${APP_ICON_MAC}. App .app/.dmg vẫn build được nhưng có thể không có icon.")
     endif()
 endif()
 
@@ -115,9 +139,6 @@ endif()
 
 # ======================================================================
 # Include directories
-# Giữ nguyên được các dòng include cũ kiểu:
-# #include "simplexsolver.h"
-# #include "dashboard.h"
 # ======================================================================
 target_include_directories(SolveLinearProgramming PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -150,6 +171,43 @@ set_target_properties(SolveLinearProgramming PROPERTIES
     MACOSX_BUNDLE TRUE
     WIN32_EXECUTABLE TRUE
 )
+
+# ======================================================================
+# Linux desktop entry + icon install
+# ======================================================================
+# Linux AppImage/desktop environment KHÔNG lấy icon từ .rc hay .ico.
+# Cần có .desktop file và icon .png theo tên app.
+#
+# Với AppImage bằng linuxdeploy, workflow vẫn nên copy file desktop/icon vào AppDir.
+# Block install dưới đây giúp khi dùng cmake --install hoặc linuxdeploy plugin,
+# icon/desktop metadata có sẵn đúng chuẩn.
+if(UNIX AND NOT APPLE)
+    set(LINUX_DESKTOP_FILE "${CMAKE_CURRENT_BINARY_DIR}/SolveLinearProgramming.desktop")
+
+    file(WRITE "${LINUX_DESKTOP_FILE}"
+"[Desktop Entry]\n"
+"Type=Application\n"
+"Name=SolveLinearProgramming\n"
+"Comment=Linear Programming Solver\n"
+"Exec=SolveLinearProgramming\n"
+"Icon=SolveLinearProgramming\n"
+"Terminal=false\n"
+"Categories=Education;Science;Math;\n"
+    )
+
+    if(EXISTS "${APP_ICON_LINUX}")
+        install(FILES "${APP_ICON_LINUX}"
+            DESTINATION share/icons/hicolor/256x256/apps
+            RENAME SolveLinearProgramming.png
+        )
+    else()
+        message(WARNING "Không tìm thấy Linux icon: ${APP_ICON_LINUX}. AppImage vẫn build được nhưng có thể không có icon.")
+    endif()
+
+    install(FILES "${LINUX_DESKTOP_FILE}"
+        DESTINATION share/applications
+    )
+endif()
 
 # ======================================================================
 # Install
