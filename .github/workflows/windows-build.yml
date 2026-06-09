@@ -330,7 +330,7 @@ jobs:
           fonts-dejavu-core fonts-liberation \
           libssl-dev openssl ca-certificates \
           curl wget tar gzip xz-utils python3 \
-          patchelf file
+          patchelf file imagemagick
 
     - name: 4. Build bằng CMake + GCC
       run: |
@@ -494,21 +494,33 @@ jobs:
 
         # [ICON FIX - LINUX APPIMAGE]
         # Sau khi restructure, icon chính nằm tại resources/images/logo.png.
-        # AppImage cần cả icon trong chuẩn hicolor và icon ở root AppDir.
+        # linuxdeploy yêu cầu icon PNG có kích thước chuẩn. Không được copy trực tiếp
+        # ảnh gốc nếu ảnh đang có kích thước lẻ như 1238px, vì sẽ báo:
+        # "invalid x resolution".
         if [ ! -f "resources/images/logo.png" ]; then
           echo "[ERROR] Không tìm thấy Linux/AppImage icon: resources/images/logo.png"
           exit 1
         fi
 
-        cp resources/images/logo.png \
+        # Tạo icon chuẩn 256x256, giữ tỉ lệ ảnh gốc và đặt vào nền trong suốt.
+        # Đây là kích thước hợp lệ và ổn định nhất cho AppImage.
+        convert "resources/images/logo.png" \
+          -resize 256x256 \
+          -background none \
+          -gravity center \
+          -extent 256x256 \
+          "AppDir/SolveLinearProgramming.png"
+
+        cp AppDir/SolveLinearProgramming.png \
            AppDir/usr/share/icons/hicolor/256x256/apps/SolveLinearProgramming.png
-        cp resources/images/logo.png AppDir/SolveLinearProgramming.png
 
         # Một số AppImage launcher/linuxdeploy cần .desktop ở root AppDir.
         cp AppDir/usr/share/applications/SolveLinearProgramming.desktop \
            AppDir/SolveLinearProgramming.desktop
 
-        echo "[OK] Linux/AppImage icon added: SolveLinearProgramming.png"
+        file AppDir/SolveLinearProgramming.png
+        identify AppDir/SolveLinearProgramming.png || true
+        echo "[OK] Linux/AppImage icon generated as valid 256x256 PNG"
 
         echo "[Paths]" > AppDir/usr/bin/qt.conf
         echo "Prefix = .." >> AppDir/usr/bin/qt.conf
