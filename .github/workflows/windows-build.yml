@@ -493,26 +493,37 @@ jobs:
         echo "StartupWMClass=SolveLinearProgramming" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
 
         # [ICON FIX - LINUX APPIMAGE]
-        # Sau khi restructure, icon chính nằm tại resources/images/logo.png.
-        # linuxdeploy yêu cầu icon PNG có kích thước chuẩn. Không được copy trực tiếp
-        # ảnh gốc nếu ảnh đang có kích thước lẻ như 1238px, vì sẽ báo:
-        # "invalid x resolution".
+        # AppImage cần icon đúng chuẩn Linux desktop.
+        # Không copy trực tiếp ảnh gốc vì ảnh logo.png có thể có kích thước lẻ
+        # như 1238px, làm linuxdeploy/appimagetool không nhận icon.
         if [ ! -f "resources/images/logo.png" ]; then
           echo "[ERROR] Không tìm thấy Linux/AppImage icon: resources/images/logo.png"
           exit 1
         fi
 
-        # Tạo icon chuẩn 256x256, giữ tỉ lệ ảnh gốc và đặt vào nền trong suốt.
-        # Đây là kích thước hợp lệ và ổn định nhất cho AppImage.
-        convert "resources/images/logo.png" \
-          -resize 256x256 \
-          -background none \
-          -gravity center \
-          -extent 256x256 \
-          "AppDir/SolveLinearProgramming.png"
+        mkdir -p AppDir/usr/share/pixmaps
 
+        # Tạo nhiều kích thước icon chuẩn để desktop environment/cache dễ nhận.
+        for size in 16 32 48 64 128 256 512; do
+          mkdir -p "AppDir/usr/share/icons/hicolor/${size}x${size}/apps"
+          convert "resources/images/logo.png" \
+            -resize "${size}x${size}" \
+            -background none \
+            -gravity center \
+            -extent "${size}x${size}" \
+            "AppDir/usr/share/icons/hicolor/${size}x${size}/apps/SolveLinearProgramming.png"
+        done
+
+        # Root icon cho linuxdeploy/appimagetool.
+        cp AppDir/usr/share/icons/hicolor/256x256/apps/SolveLinearProgramming.png \
+           AppDir/SolveLinearProgramming.png
+
+        # .DirIcon giúp AppImage/AppDir có icon khi desktop/file manager hỗ trợ đọc metadata.
+        cp AppDir/SolveLinearProgramming.png AppDir/.DirIcon
+
+        # Pixmaps fallback cho một số desktop environment.
         cp AppDir/SolveLinearProgramming.png \
-           AppDir/usr/share/icons/hicolor/256x256/apps/SolveLinearProgramming.png
+           AppDir/usr/share/pixmaps/SolveLinearProgramming.png
 
         # Một số AppImage launcher/linuxdeploy cần .desktop ở root AppDir.
         cp AppDir/usr/share/applications/SolveLinearProgramming.desktop \
@@ -520,7 +531,8 @@ jobs:
 
         file AppDir/SolveLinearProgramming.png
         identify AppDir/SolveLinearProgramming.png || true
-        echo "[OK] Linux/AppImage icon generated as valid 256x256 PNG"
+        ls -la AppDir/.DirIcon AppDir/SolveLinearProgramming.png AppDir/SolveLinearProgramming.desktop
+        echo "[OK] Linux/AppImage icon generated with hicolor sizes and .DirIcon"
 
         echo "[Paths]" > AppDir/usr/bin/qt.conf
         echo "Prefix = .." >> AppDir/usr/bin/qt.conf
