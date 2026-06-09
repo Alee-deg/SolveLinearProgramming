@@ -6,28 +6,116 @@
 #include <QStandardPaths> // Thư viện để đọc đường dẫn AppData
 #include <QDir>
 #include <QIcon>
+#include <QFile>
+#include <QStringList>
+#include <QPointer>
+#include <QWindow>
+#include <QVariant>
+#include <QTimer>
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 // =======================================================================
-// [FIX ICON ĐỒNG BỘ TOÀN BỘ CỬA SỔ]
-// Mỗi cửa sổ top-level phải có icon riêng. Nếu chỉ set icon ở MainWindow,
-// khi chuyển sang Dashboard / WdSolve / ChatBot / cửa sổ xem hình, Windows
-// có thể lấy icon mặc định hoặc làm mất icon trên taskbar.
-// Hàm dưới đây lấy icon chung từ QApplication; nếu chưa có thì fallback về
-// icon đã nhúng trong resource.qrc theo alias ":/logo.png".
+// [FIX ICON TASKBAR - WINDOWS / MACOS / LINUX]
+// Lý do lỗi cũ:
+// - MainWindow có icon, nhưng Dashboard / WdSolve / WdChatBot / WdShowImage
+//   được mở như cửa sổ top-level khác.
+// - Trên Windows, nếu cửa sổ mới không có icon native riêng hoặc là owned window
+//   của MainWindow đang bị hide, taskbar có thể mất icon hoặc hiện icon mặc định.
+//
+// Cách xử lý:
+// 1. Tải icon từ Qt Resource với nhiều đường dẫn fallback.
+// 2. Set icon cho QApplication và từng top-level window.
+// 3. Trên Windows, ép thêm icon native bằng WM_SETICON từ resource icon của .exe.
+// 4. Các cửa sổ chuyển màn hình sẽ được tạo với parent = nullptr để không trở
+//    thành owned window bị phụ thuộc taskbar vào MainWindow.
 // =======================================================================
 static QIcon phanMemQHTTAppIcon()
 {
-    QIcon icon = qApp ? qApp->windowIcon() : QIcon();
+    const QStringList resourceCandidates = {
+        ":/logo.png",
+        ":/new/prefix1/logo.png",
+        ":/logo.ico",
+        ":/new/prefix1/logo.ico",
+        ":/Logo TA Ngang.png",
+        ":/new/prefix1/Logo TA Ngang.png"
+    };
 
-    if (icon.isNull()) {
-        icon = QIcon(":/logo.png");
-        if (qApp) {
-            qApp->setWindowIcon(icon);
+    for (const QString& path : resourceCandidates) {
+        if (QFile::exists(path)) {
+            QIcon icon(path);
+            if (!icon.isNull()) {
+                if (qApp) {
+                    qApp->setWindowIcon(icon);
+                }
+                return icon;
+            }
         }
+    }
+
+    if (qApp && !qApp->windowIcon().isNull()) {
+        return qApp->windowIcon();
+    }
+
+    return QIcon();
+}
+
+#ifdef Q_OS_WIN
+static HICON phanMemQHTTLoadWindowsResourceIcon(int width, int height)
+{
+    HINSTANCE instance = GetModuleHandleW(nullptr);
+
+    HICON icon = reinterpret_cast<HICON>(
+        LoadImageW(instance, L"IDI_ICON1", IMAGE_ICON, width, height, LR_DEFAULTCOLOR)
+        );
+
+    if (!icon) {
+        icon = reinterpret_cast<HICON>(
+            LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, width, height, LR_DEFAULTCOLOR)
+            );
+    }
+
+    if (!icon) {
+        icon = reinterpret_cast<HICON>(
+            LoadImageW(instance, MAKEINTRESOURCEW(101), IMAGE_ICON, width, height, LR_DEFAULTCOLOR)
+            );
     }
 
     return icon;
 }
+
+static void applyPhanMemQHTTNativeWindowsIcon(QWidget *window)
+{
+    if (!window) return;
+
+    HWND hwnd = reinterpret_cast<HWND>(window->winId());
+    if (!hwnd) return;
+
+    HICON bigIcon = phanMemQHTTLoadWindowsResourceIcon(
+        GetSystemMetrics(SM_CXICON),
+        GetSystemMetrics(SM_CYICON)
+        );
+
+    HICON smallIcon = phanMemQHTTLoadWindowsResourceIcon(
+        GetSystemMetrics(SM_CXSMICON),
+        GetSystemMetrics(SM_CYSMICON)
+        );
+
+    if (bigIcon) {
+        SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(bigIcon));
+        SetClassLongPtrW(hwnd, GCLP_HICON, reinterpret_cast<LONG_PTR>(bigIcon));
+    }
+
+    if (smallIcon) {
+        SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(smallIcon));
+        SetClassLongPtrW(hwnd, GCLP_HICONSM, reinterpret_cast<LONG_PTR>(smallIcon));
+    }
+}
+#endif
 
 static void applyPhanMemQHTTWindowIcon(QWidget *window)
 {
@@ -36,8 +124,52 @@ static void applyPhanMemQHTTWindowIcon(QWidget *window)
     const QIcon icon = phanMemQHTTAppIcon();
     if (!icon.isNull()) {
         window->setWindowIcon(icon);
+
+        if (window->windowHandle()) {
+            window->windowHandle()->setIcon(icon);
+        }
     }
+
+#ifdef Q_OS_WIN
+    // Ép tạo native handle và set icon lại sau khi Qt đã tạo cửa sổ thật.
+    applyPhanMemQHTTNativeWindowsIcon(window);
+
+    QPointer<QWidget> safeWindow(window);
+    QTimer::singleShot(0, window, [safeWindow, icon]() {
+        if (!safeWindow) return;
+
+        if (!icon.isNull()) {
+            safeWindow->setWindowIcon(icon);
+            if (safeWindow->windowHandle()) {
+                safeWindow->windowHandle()->setIcon(icon);
+            }
+        }
+
+        applyPhanMemQHTTNativeWindowsIcon(safeWindow.data());
+    });
+#endif
 }
+
+static void setPhanMemQHTTReturnWindow(QWidget *childWindow, QWidget *returnWindow)
+{
+    if (!childWindow || !returnWindow) return;
+    childWindow->setProperty("phanMemQHTT_returnWindow",
+                             QVariant::fromValue<QObject*>(returnWindow));
+}
+
+static QWidget* phanMemQHTTReturnWindow(QWidget *currentWindow)
+{
+    if (!currentWindow) return nullptr;
+
+    QObject *returnObject =
+        currentWindow->property("phanMemQHTT_returnWindow").value<QObject*>();
+
+    QWidget *returnWidget = qobject_cast<QWidget*>(returnObject);
+    if (returnWidget) return returnWidget;
+
+    return currentWindow->parentWidget();
+}
+
 
 // =======================================================================
 // HÀM TIỆN ÍCH
@@ -64,7 +196,7 @@ WdShowImage::WdShowImage(QWidget *parent)
 {
     ui->setupUi(this);
 
-    // Đảm bảo cửa sổ biểu diễn hình học là top-level window có icon riêng trên taskbar
+    // Cửa sổ biểu diễn hình học là cửa sổ độc lập để taskbar Windows luôn nhận icon riêng.
     this->setWindowFlag(Qt::Window, true);
     applyPhanMemQHTTWindowIcon(this);
 
@@ -81,9 +213,12 @@ WdShowImage::~WdShowImage()
 // Nút quay lại (Back): Hiển thị lại cửa sổ cha và đóng cửa sổ hiện tại
 void WdShowImage::on_pushButton_clicked()
 {
-    if (this->parentWidget()) {
-        applyPhanMemQHTTWindowIcon(this->parentWidget());
-        this->parentWidget()->show();
+    QWidget *returnWindow = phanMemQHTTReturnWindow(this);
+    if (returnWindow) {
+        applyPhanMemQHTTWindowIcon(returnWindow);
+        returnWindow->show();
+        returnWindow->raise();
+        returnWindow->activateWindow();
     }
     this->close();
 }
