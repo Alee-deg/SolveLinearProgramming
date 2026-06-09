@@ -1,18 +1,73 @@
 <RCC>
+    <!--
+        resource.qrc nằm trong thư mục: resources/
+
+        Cấu trúc thư mục đề xuất:
+        resources/
+        ├── resource.qrc
+        ├── images/
+        │   ├── Logo TA Ngang.png
+        │   ├── logo.png
+        │   ├── logo.ico
+        │   ├── Pasted image.png
+        │   ├── Pasted image (2).png
+        │   ├── Pasted image (3).png
+        │   ├── Pasted image (4).png
+        │   ├── Pasted image (5).png
+        │   ├── Pasted image (6).png
+        │   └── Pasted image (7).png
+        └── icons/
+            ├── nest_display_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg
+            ├── arrow_back_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg
+            ├── question_mark_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg
+            └── contact_support_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg
+    -->
+
+    <!--
+        Prefix "/" để code có thể gọi ngắn gọn:
+        QIcon(":/logo.png")
+        QIcon(":/arrow_back_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg")
+    -->
+    <qresource prefix="/">
+        <file alias="Logo TA Ngang.png">images/Logo TA Ngang.png</file>
+        <file alias="logo.png">images/logo.png</file>
+        <file alias="logo.ico">images/logo.ico</file>
+
+        <file alias="Pasted image.png">images/Pasted image.png</file>
+        <file alias="Pasted image (2).png">images/Pasted image (2).png</file>
+        <file alias="Pasted image (3).png">images/Pasted image (3).png</file>
+        <file alias="Pasted image (4).png">images/Pasted image (4).png</file>
+        <file alias="Pasted image (5).png">images/Pasted image (5).png</file>
+        <file alias="Pasted image (6).png">images/Pasted image (6).png</file>
+        <file alias="Pasted image (7).png">images/Pasted image (7).png</file>
+
+        <file alias="nest_display_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg">icons/nest_display_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg</file>
+        <file alias="arrow_back_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg">icons/arrow_back_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg</file>
+        <file alias="question_mark_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg">icons/question_mark_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg</file>
+        <file alias="contact_support_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg">icons/contact_support_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg</file>
+    </qresource>
+
+    <!--
+        Giữ prefix cũ "/new/prefix1" để tránh lỗi nếu trong code cũ vẫn còn gọi:
+        QIcon(":/new/prefix1/logo.png")
+        QPixmap(":/new/prefix1/Pasted image.png")
+    -->
     <qresource prefix="/new/prefix1">
-        <file>Logo TA Ngang.png</file>
-        <file>nest_display_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg</file>
-        <file>arrow_back_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg</file>
-        <file>question_mark_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg</file>
-        <file>contact_support_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg</file>
-        <file>Pasted image (3).png</file>
-        <file>Pasted image (4).png</file>
-        <file>Pasted image (5).png</file>
-        <file>Pasted image (6).png</file>
-        <file>Pasted image (7).png</file>
-        <file>logo.png</file>
-        <file>logo.ico</file>
-        <file>Pasted image.png</file>
-        <file>Pasted image (2).png</file>
+        <file alias="Logo TA Ngang.png">images/Logo TA Ngang.png</file>
+        <file alias="logo.png">images/logo.png</file>
+        <file alias="logo.ico">images/logo.ico</file>
+
+        <file alias="Pasted image.png">images/Pasted image.png</file>
+        <file alias="Pasted image (2).png">images/Pasted image (2).png</file>
+        <file alias="Pasted image (3).png">images/Pasted image (3).png</file>
+        <file alias="Pasted image (4).png">images/Pasted image (4).png</file>
+        <file alias="Pasted image (5).png">images/Pasted image (5).png</file>
+        <file alias="Pasted image (6).png">images/Pasted image (6).png</file>
+        <file alias="Pasted image (7).png">images/Pasted image (7).png</file>
+
+        <file alias="nest_display_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg">icons/nest_display_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg</file>
+        <file alias="arrow_back_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg">icons/arrow_back_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg</file>
+        <file alias="question_mark_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg">icons/question_mark_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg</file>
+        <file alias="contact_support_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg">icons/contact_support_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg</file>
     </qresource>
 </RCC>
