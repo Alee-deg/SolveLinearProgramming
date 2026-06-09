@@ -91,5 +91,5 @@ SolveLinearProgramming/
         Tài liệu hướng dẫn sử dụng phần mềm.
 ```
 
-Toàn bộ mã nguồn thuật toán(đơn hình, bland, 2 pha) được lưu trữ tại src/core/simplexsolver.cpp
+Toàn bộ mã nguồn thuật toán(đơn hình, bland, 2 pha) được lưu trữ tại src/core/simplexsolver.cpp, 
 File Báo cáo, HDSD, Hướng dẫn cài đặt được lưu tại thư mục docs 
