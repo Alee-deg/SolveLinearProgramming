@@ -2,16 +2,74 @@
 #include <set>
 #include <cmath>
 
-// Hằng số dùng để so sánh số thực, tránh các lỗi sai số dấu phẩy động (floating-point precision)
+/*
+================================================================================
+ TỔNG QUAN FILE SIMPLEXSOLVER.CPP
+--------------------------------------------------------------------------------
+ File này cài đặt lớp SimplexSolver, chịu trách nhiệm giải bài toán Quy hoạch
+ tuyến tính bằng thuật toán Đơn hình.
+
+ Luồng xử lý chính:
+  1. Nhận bài toán gốc LinearProgram từ giao diện.
+  2. Chuyển bài toán về dạng chuẩn:
+     - Max Z được đổi thành Min(-Z).
+     - Ràng buộc >= được nhân -1 để chuyển thành <=.
+     - Biến tự do được tách thành hiệu của hai biến không âm.
+     - Biến <= 0 được đổi dấu để trở thành biến >= 0.
+     - Thêm biến slack cho ràng buộc <=.
+     - Với ràng buộc =, cố gắng chọn biến hiện có làm biến cơ sở.
+  3. Xây dựng tableau đơn hình ban đầu.
+  4. Nếu cần, chạy Pha 1 với duy nhất một biến giả x0.
+  5. Chạy vòng lặp Simplex:
+     - Chọn cột xoay.
+     - Chọn hàng xoay.
+     - Thực hiện pivot.
+     - Lưu lại từng bước vào history để hiển thị ở giao diện.
+  6. Sau khi tối ưu, kiểm tra vô số nghiệm và tìm điểm tối ưu thứ hai nếu có.
+
+ Quy ước quan trọng:
+  - CLEAN_EPS dùng để so sánh số thực thay vì so sánh trực tiếp với 0.
+  - tableau[m][n] là hằng số tự do của hàng mục tiêu.
+  - basicVariables[i] lưu chỉ số biến cơ sở của dòng ràng buộc i.
+  - history lưu toàn bộ các bước từ vựng/tableau để phục vụ giao diện và PDF.
+  - Với bài toán Max, thuật toán giải qua Min(-Z), nên một số chỗ phải đảo dấu
+    khi trả kết quả về cho người dùng.
+
+ Lưu ý bảo trì:
+  - File này là phần lõi thuật toán, không xử lý giao diện trực tiếp.
+  - Không nên thay đổi dấu của tableau nếu chưa kiểm tra lại getOptimalZ(),
+    getSolution(), runSimplexLoop() và phần xuất báo cáo.
+================================================================================
+*/
+
+
+// Hằng số dùng để so sánh số thực, tránh các lỗi sai số dấu phẩy động (floating-point precision).
+// Không nên dùng so sánh trực tiếp kiểu value == 0.0 trong thuật toán Simplex,
+// vì các phép chia/pivot có thể tạo ra sai số rất nhỏ như 1e-15.
+// CLEAN_EPS được dùng để:
+// - Xem một số rất nhỏ là 0.
+// - Kiểm tra hệ số âm/dương trong chọn cột xoay và hàng xoay.
+// - Tránh pivot trên phần tử gần 0 gây mất ổn định số học.
 static const double CLEAN_EPS = 1e-10;
 
-// Constructor: Khởi tạo bộ giải với bài toán quy hoạch tuyến tính đầu vào
+// Constructor: Khởi tạo bộ giải với bài toán quy hoạch tuyến tính đầu vào.
+// inputLP là bài toán người dùng nhập ở giao diện, gồm:
+// - c: hệ số hàm mục tiêu.
+// - c_0: hằng số tự do của hàm mục tiêu.
+// - A, b, signs: hệ ràng buộc.
+// - varBounds: điều kiện dấu của biến.
+// - isMaximize: true nếu bài toán gốc là Max Z.
+// - algoType: phương pháp giải người dùng chọn.
 SimplexSolver::SimplexSolver(const LinearProgram& inputLP){
     this->lp = inputLP;
     this->statusMsg = "Chưa giải";
 }
 
-// Lấy giá trị hàm mục tiêu (Z) tối ưu
+// Lấy giá trị hàm mục tiêu tối ưu để trả về cho giao diện.
+// Chú ý:
+// - Bên trong thuật toán, bài toán Max được chuyển thành Min(-Z).
+// - Vì vậy khi bài toán gốc là Max, cần đảo dấu/hệ quy chiếu để hiển thị lại Z gốc.
+// - Nếu tableau chưa được tạo, trả 0.0 để tránh truy cập mảng rỗng.
 double SimplexSolver::getOptimalZ() const{
     if(this->tableau.empty()) return 0.0;
     int m = this->tableau.size() - 1;
@@ -21,7 +79,20 @@ double SimplexSolver::getOptimalZ() const{
     return this->lp.isMaximize ? z : -z;
 }
 
-// Trích xuất nghiệm tối ưu cho các biến gốc của bài toán
+// Trích xuất nghiệm tối ưu cho các biến gốc của bài toán.
+// Đây là bước ánh xạ ngược từ biến nội bộ của dạng chuẩn về biến người dùng nhập.
+//
+// Ví dụ:
+// - Nếu x_j là biến bình thường >= 0:
+//      x_j = giá trị biến nội bộ tương ứng.
+// - Nếu x_j là biến tự do:
+//      x_j được tách thành x_j^+ - x_j^-,
+//      nên nghiệm gốc là x_j = value(x_j^+) - value(x_j^-).
+// - Nếu x_j có điều kiện x_j <= 0:
+//      thuật toán đổi biến x_j = -u_j với u_j >= 0,
+//      nên nghiệm gốc là x_j = -value(u_j).
+//
+// Hàm này chỉ đọc tableau hiện tại, không làm thay đổi trạng thái solver.
 std::vector<double> SimplexSolver::getSolution() const {
     int origCount = (int)originalVarBounds.size();
     std::vector<double> sol(origCount, 0.0);
@@ -59,17 +130,37 @@ std::vector<double> SimplexSolver::getSolution() const {
     return sol;
 }
 
+// Trả về nghiệm tối ưu thứ nhất.
+// Biến này được lưu sau khi thuật toán tìm được nghiệm tối ưu đầu tiên.
+// Nếu bài toán có vô số nghiệm, firstSolution là một đầu mút/điểm tối ưu đầu tiên.
 std::vector<double> SimplexSolver::getFirstSolution() const {
     return firstSolution;
 }
 
+// Trả về nghiệm tối ưu thứ hai nếu phát hiện bài toán có vô số nghiệm.
+// Nếu không có nghiệm thứ hai thực sự khác, altSolution sẽ bằng firstSolution.
 std::vector<double> SimplexSolver::getAltSolution() const {
     return altSolution;
 }
 
+// Trả về trạng thái cuối cùng của thuật toán để giao diện hiển thị.
+// Ví dụ: "Tối ưu", "Vô số nghiệm", "Bài toán không giới nội", "Vô nghiệm".
 QString SimplexSolver::getStatus() const { return this->statusMsg; }
 
-// Chuyển đổi bài toán về dạng chuẩn (Standard Form) để áp dụng thuật toán Đơn hình
+// Chuyển đổi bài toán về dạng chuẩn (Standard Form) để áp dụng thuật toán Đơn hình.
+//
+// Mục tiêu của dạng chuẩn trong file này:
+// - Toàn bộ bài toán được xử lý theo hướng Min.
+// - Ràng buộc chính được đưa về dạng phương trình.
+// - Các biến nội bộ đều không âm.
+// - Có một cơ sở ban đầu nếu có thể.
+//
+// Các bước chính:
+// 1. Lưu lại số biến gốc và điều kiện dấu gốc để cuối cùng ánh xạ nghiệm trở lại.
+// 2. Nếu bài toán gốc là Max Z, đổi thành Min(-Z).
+// 3. Đổi ràng buộc >= thành <= bằng cách nhân cả hai vế với -1.
+// 4. Xử lý biến tự do và biến <= 0.
+// 5. Thêm biến slack hoặc chọn cơ sở cho các ràng buộc.
 void SimplexSolver::convertToStandardForm() {
     this->originalVarsCount = lp.c.size();
     this->originalVarBounds = lp.varBounds;
@@ -96,9 +187,29 @@ void SimplexSolver::convertToStandardForm() {
     this->addSlackAndSurplusVariables();
 }
 
+// Hàm dự phòng cho xử lý vế phải âm.
+// Hiện tại logic vế phải âm được xử lý trong solve():
+// - Nếu tồn tại b_i âm, solver sẽ yêu cầu chạy Pha 1.
+// - Với Pha 1, code sử dụng duy nhất một biến giả x0.
+// Hàm này được giữ lại để không phá vỡ interface/header cũ.
 void SimplexSolver::handleNegativeB() { }
 
-// Xử lý các điều kiện của biến (tùy ý, <= 0) đưa về dạng chuẩn >= 0
+// Xử lý các điều kiện của biến để đưa tất cả biến nội bộ về dạng >= 0.
+//
+// Trường hợp 1: Biến tự do.
+//   x_j không bị ràng buộc dấu, có thể âm/dương.
+//   Đổi thành:
+//      x_j = x_j^+ - x_j^-
+//      x_j^+ >= 0, x_j^- >= 0
+//   Vì vậy cần chèn thêm một cột mới vào A và một hệ số mới vào c.
+//
+// Trường hợp 2: Biến có điều kiện x_j <= 0.
+//   Đổi biến:
+//      x_j = -u_j, u_j >= 0
+//   Khi đó toàn bộ cột hệ số của x_j và hệ số mục tiêu tương ứng phải đổi dấu.
+//
+// Vòng lặp chạy từ cuối về đầu để khi insert cột mới không làm lệch chỉ số
+// của các biến chưa xử lý phía trước.
 void SimplexSolver::handleVariableBounds() {
     for (int j = (int)lp.varBounds.size() - 1; j >= 0; --j) {
         VarBound vb = lp.varBounds[j];
@@ -122,14 +233,35 @@ void SimplexSolver::handleVariableBounds() {
 }
 
 // -----------------------------------------------------------------------
-// Tự động nhận diện ma trận cơ sở & thêm biến bù (slack) / biến giả (artificial)
+// Tự động nhận diện ma trận cơ sở và thêm biến bù slack khi cần.
+// -----------------------------------------------------------------------
+//
+// Hàm này thực hiện phần rất quan trọng: tạo cơ sở ban đầu cho tableau.
+//
+// Quy tắc trong bản hiện tại:
+// - Ràng buộc "<=":
+//     Thêm biến slack w_i với hệ số +1 ở dòng tương ứng.
+//     Biến slack này trở thành biến cơ sở ban đầu của dòng đó.
+//
+// - Ràng buộc "=":
+//     KHÔNG thêm slack riêng, vì thêm slack cho dấu "=" sẽ làm thay đổi
+//     bản chất bài toán.
+//     Thay vào đó, solver cố gắng:
+//       1. Tìm một cột đơn vị sẵn có trong A.
+//       2. Nếu chưa có, chọn một biến hiện có và dùng khử Gauss-Jordan
+//          để biến cột đó thành cột đơn vị.
+//
+// Lưu ý:
+// - Đây không phải Pha 1.
+// - Biến giả duy nhất x0 chỉ được tạo trong solveTwoPhase() khi cần.
+// - basicVariables[i] lưu chỉ số biến cơ sở của dòng i.
 // -----------------------------------------------------------------------
 void SimplexSolver::addSlackAndSurplusVariables() {
     int m = (int)lp.signs.size();
     this->basicVariables.assign(m, -1);
 
     // ===================================================================
-    // [FIX] KHÔNG thêm slack/biến giả riêng cho ràng buộc "=".
+    // KHÔNG thêm slack/biến giả riêng cho ràng buộc "=".
     // - Ràng buộc <=: thêm slack +1 như bình thường để có biến cơ sở.
     // - Ràng buộc = : giữ đúng bản chất phương trình, sau đó chọn một
     //   biến hiện có làm biến cơ sở bằng phép khử Gauss-Jordan.
@@ -233,7 +365,21 @@ void SimplexSolver::addSlackAndSurplusVariables() {
 }
 
 
-// Hàm chính điều phối việc giải bài toán
+// Hàm chính điều phối toàn bộ quá trình giải bài toán.
+//
+// Luồng xử lý:
+// 1. Chuyển bài toán về dạng chuẩn.
+// 2. Nếu không tạo được cơ sở ban đầu thì dừng.
+// 3. Kiểm tra vế phải b_i có âm hay không.
+//    - Nếu có b_i âm, cần Pha 1 để tìm điểm xuất phát khả thi.
+//    - Nếu người dùng chọn thuật toán không hỗ trợ Pha 1, báo lỗi gợi ý.
+// 4. Nếu không cần Pha 1, xây tableau và chạy Simplex bình thường.
+// 5. Sau khi tối ưu, kiểm tra vô số nghiệm.
+// 6. Lưu nghiệm đầu tiên và nghiệm thứ hai nếu có.
+//
+// Giá trị trả về:
+// - true: solver kết thúc hợp lệ.
+// - false: vô nghiệm, không giới nội, không tạo được cơ sở hoặc lỗi thuật toán.
 bool SimplexSolver::solve() {
     convertToStandardForm();
 
@@ -292,7 +438,19 @@ bool SimplexSolver::solve() {
 }
 
 
-// Xây dựng Bảng đơn hình (Tableau) ban đầu
+// Xây dựng bảng đơn hình ban đầu từ bài toán đã ở dạng chuẩn.
+//
+// Cấu trúc tableau:
+// - Các dòng 0..m-1: hệ ràng buộc.
+// - Dòng m: hàm mục tiêu.
+// - Các cột 0..n-1: hệ số các biến.
+// - Cột n: vế phải / hằng số tự do.
+//
+// Sau khi điền dữ liệu, cần canonical hóa hàng mục tiêu theo cơ sở hiện tại:
+// Nếu biến cơ sở có hệ số khác 0 trong hàng mục tiêu, ta khử nó về 0.
+// Điều này đảm bảo từ vựng ban đầu đúng dạng:
+//      biến cơ sở = hằng số + tổ hợp biến không cơ sở
+//      Z hoặc -Z = hằng số + tổ hợp biến không cơ sở
 void SimplexSolver::buildTableau() {
     int m = lp.A.size();
     int n = lp.c.size();
@@ -310,7 +468,7 @@ void SimplexSolver::buildTableau() {
     tableau[m][n] = lp.c_0;
 
     // ===================================================================
-    // [FIX] Canonical hóa hàng mục tiêu theo cơ sở hiện tại.
+    // Canonical hóa hàng mục tiêu theo cơ sở hiện tại.
     // Trước đây code chỉ đúng khi cơ sở là slack có c_j = 0. Với ràng buộc
     // "=", ta có thể chọn biến gốc/biến tách làm biến cơ sở, c_j có thể khác 0.
     // Nếu không khử cột cơ sở khỏi hàng mục tiêu, simplex sẽ giải sai.
@@ -334,7 +492,17 @@ void SimplexSolver::buildTableau() {
 }
 
 
-// Tìm Cột xoay (Biến vào)
+// Tìm cột xoay, tức biến không cơ sở sẽ đi vào cơ sở.
+//
+// Vì solver đang làm việc với bài toán Min:
+// - Nếu còn hệ số âm ở hàng mục tiêu, tăng biến đó sẽ làm giảm giá trị mục tiêu.
+// - Do đó, cột xoay là cột có hệ số âm.
+//
+// Hai quy tắc chọn:
+// - Bland: chọn cột âm đầu tiên, giúp hạn chế xoay vòng.
+// - Dantzig: chọn cột có hệ số âm nhất, thường hội tụ nhanh hơn.
+//
+// Nếu không còn hệ số âm, bài toán đã đạt tối ưu.
 int SimplexSolver::findPivotColumn() {
     int m = tableau.size() - 1;
     int n = tableau[0].size() - 1;
@@ -358,7 +526,19 @@ int SimplexSolver::findPivotColumn() {
     return -1; // Không tìm thấy cột xoay -> Đã đạt tối ưu
 }
 
-// Tìm Hàng xoay (Biến ra) sử dụng bài toán tỷ số nhỏ nhất (Minimum Ratio Test)
+// Tìm hàng xoay, tức biến cơ sở sẽ rời khỏi cơ sở.
+//
+// Sử dụng kiểm tra tỷ số nhỏ nhất:
+//      ratio_i = b_i / a_ij
+// chỉ xét các dòng có a_ij > 0.
+//
+// Ý nghĩa:
+// - Khi tăng biến vào, các biến cơ sở thay đổi.
+// - Dòng nào đạt 0 trước sẽ là dòng giới hạn, biến cơ sở ở dòng đó phải rời cơ sở.
+// - Nếu không có a_ij > 0 cho cột xoay, biến vào có thể tăng vô hạn,
+//   nên bài toán không giới nội.
+//
+// Nếu dùng Bland và có tỷ số hòa, ưu tiên biến cơ sở có chỉ số nhỏ hơn để chống cycling.
 int SimplexSolver::findPivotRow(int pivotCol) {
     int m = tableau.size() - 1;
     int n = tableau[0].size() - 1;
@@ -388,7 +568,20 @@ int SimplexSolver::findPivotRow(int pivotCol) {
     return pivotRow;
 }
 
-// Thực hiện phép biến đổi Gauss-Jordan (Xoay/Pivot)
+// Thực hiện phép biến đổi Gauss-Jordan tại phần tử pivot.
+//
+// Mục tiêu:
+// - Biến cột pivotCol trở thành biến cơ sở mới ở dòng pivotRow.
+// - Cột pivotCol được biến thành cột đơn vị:
+//      phần tử pivot = 1,
+//      các phần tử còn lại trong cột = 0.
+//
+// Các bước:
+// 1. Chia toàn bộ hàng pivot cho phần tử pivot.
+// 2. Dùng hàng pivot để khử cột pivot ở tất cả dòng khác.
+// 3. Cập nhật basicVariables.
+// 4. Tăng iterationCount.
+// 5. Ghi lại bước mới vào history.
 void SimplexSolver::performPivot(int pivotRow, int pivotCol) {
     int m = tableau.size();
     int n = tableau[0].size();
@@ -417,7 +610,21 @@ void SimplexSolver::performPivot(int pivotRow, int pivotCol) {
     recordStep(QString("Từ vựng %1").arg(iterationCount + 1));
 }
 
-// Vòng lặp chính của Đơn hình
+// Vòng lặp chính của thuật toán Đơn hình.
+//
+// Tham số isPhaseOne:
+// - Được dùng để đánh dấu vòng lặp đang chạy cho Pha 1 hay Pha 2.
+// - Hiện tại trong thân hàm chưa cần phân nhánh theo isPhaseOne,
+//   nhưng vẫn giữ tham số để thuận tiện mở rộng và không phá interface.
+//
+// Mỗi vòng lặp:
+// 1. Kiểm tra giới hạn số vòng để tránh cycling vô hạn.
+// 2. Tìm cột xoay.
+// 3. Nếu không có cột xoay, đã tối ưu.
+// 4. Tìm hàng xoay.
+// 5. Nếu không có hàng xoay, bài toán không giới nội.
+// 6. Lưu pivot vào history để giao diện tô sáng.
+// 7. Thực hiện pivot.
 bool SimplexSolver::runSimplexLoop(bool isPhaseOne) {
     const int MAX_ITERATIONS = 500;
     while (true) {
@@ -428,9 +635,14 @@ bool SimplexSolver::runSimplexLoop(bool isPhaseOne) {
         }
 
         int pivotCol = findPivotColumn();
+        // Nếu không còn cột có hệ số âm ở hàng mục tiêu,
+        // điều kiện tối ưu của bài toán Min đã thỏa mãn.
         if (pivotCol == -1) return true; // Dấu hiệu dừng: Tất cả hệ số dòng mục tiêu >= 0
 
         int pivotRow = findPivotRow(pivotCol);
+        // Nếu có cột xoay nhưng không có hàng xoay hợp lệ,
+        // biến vào có thể tăng vô hạn mà không làm biến cơ sở nào âm.
+        // Do đó hàm mục tiêu cải thiện vô hạn => bài toán không giới nội.
         if (pivotRow == -1) { // Không tìm thấy hàng xoay -> Bài toán không giới nội (Unbounded)
             statusMsg = "Bài toán không giới nội";
             if (!history.empty()) {
@@ -448,7 +660,26 @@ bool SimplexSolver::runSimplexLoop(bool isPhaseOne) {
     }
 }
 
-// Thuật toán Đơn hình 2 pha (Giải quyết các bài toán có điểm xuất phát không khả thi / b < 0)
+// Thuật toán Đơn hình 2 pha.
+//
+// Mục đích:
+// - Xử lý bài toán chưa có điểm xuất phát khả thi rõ ràng,
+//   đặc biệt khi có vế phải b_i âm sau khi chuyển dạng chuẩn.
+//
+// Điểm đặc biệt của bản cài đặt này:
+// - Pha 1 chỉ dùng MỘT biến giả duy nhất x0.
+// - Không tạo a1, a2, ... cho từng ràng buộc.
+// - x0 được thêm vào tất cả phương trình với hệ số -1.
+// - Nếu có dòng b_i âm, pivot x0 vào dòng có b_i âm nhất.
+// - Sau đó tối thiểu hóa x0.
+// - Nếu Min x0 > 0, hệ gốc vô nghiệm.
+// - Nếu Min x0 = 0, bài toán có nghiệm khả thi và chuyển sang Pha 2.
+//
+// Pha 2:
+// - Khôi phục lại hàm mục tiêu gốc.
+// - Không cho x0 quay lại cơ sở bằng cách đặt hệ số rất lớn 1e9.
+// - Canonical hóa hàng mục tiêu theo cơ sở hiện tại.
+// - Chạy Simplex bình thường.
 bool SimplexSolver::solveTwoPhase() {
     int m = lp.A.size();
     int n_slack = lp.c.size();
@@ -502,6 +733,8 @@ bool SimplexSolver::solveTwoPhase() {
     // Với quy ước getOptimalZ ở pha 1, hằng số hàng mục tiêu có thể mang dấu âm
     // sau các phép biến đổi, nên dùng trị tuyệt đối giá trị x0 cơ sở/giá trị mục tiêu.
     double auxValue = 0.0;
+    // Sau Pha 1, nếu x0 vẫn còn trong cơ sở với giá trị 0,
+    // ta cố gắng pivot x0 ra khỏi cơ sở để Pha 2 không phụ thuộc vào biến giả.
     for (int i = 0; i < m; ++i) {
         if (basicVariables[i] == a_col) {
             auxValue = tableau[i][cols];
@@ -594,7 +827,20 @@ bool SimplexSolver::solveTwoPhase() {
 }
 
 
-// Lưu lại trạng thái của mỗi bước lặp (để phục vụ tính năng hiển thị từng bước cho người dùng)
+// Lưu lại trạng thái của mỗi bước lặp.
+//
+// history được dùng cho:
+// - Bảng các bước thực thi.
+// - Dạng từ vựng [w, x, z].
+// - Xuất báo cáo PDF/.tex.
+// - Chatbot giải thích từng bước.
+// - Tô màu biến vào/biến ra trên giao diện.
+//
+// Mỗi SimplexStep lưu:
+// - tên bước,
+// - ma trận tableau tại thời điểm đó,
+// - danh sách biến cơ sở,
+// - nghiệm hiện tại của biến gốc.
 void SimplexSolver::recordStep(const QString& name) {
     SimplexStep step;
     step.stepName         = name;
@@ -604,7 +850,18 @@ void SimplexSolver::recordStep(const QString& name) {
     history.push_back(step);
 }
 
-// Kiểm tra xem bài toán có Vô số nghiệm hay không
+// Kiểm tra bài toán có vô số nghiệm tối ưu hay không.
+//
+// Tiêu chuẩn cơ bản trong Simplex:
+// - Sau khi đạt tối ưu, nếu tồn tại biến không cơ sở có hệ số mục tiêu bằng 0,
+//   thì có thể đưa biến đó vào cơ sở mà không làm thay đổi giá trị tối ưu.
+// - Khi đó bài toán có khả năng có nhiều nghiệm tối ưu.
+//
+// Lưu ý quan trọng:
+// - Với biến tự do được tách thành x_i^+ và x_i^-,
+//   không dùng riêng hai nửa biến này để kết luận vô số nghiệm,
+//   vì chúng chỉ là biểu diễn nội bộ.
+// - Do đó các cột sinh ra từ biến tự do được đưa vào ignoredCols.
 bool SimplexSolver::checkAlternativeOptima() {
     int m = tableau.size() - 1;
     int n = tableau[0].size() - 1;
@@ -637,7 +894,19 @@ bool SimplexSolver::checkAlternativeOptima() {
     return false;
 }
 
-// Tìm điểm tối ưu thứ 2 (để tạo ra đoạn thẳng chứa vô số nghiệm)
+// Tìm điểm tối ưu thứ hai nếu bài toán có vô số nghiệm.
+//
+// Ý tưởng:
+// - Quét các biến không cơ sở có hệ số mục tiêu bằng 0.
+// - Thử pivot biến đó vào cơ sở.
+// - Nếu nghiệm mới khác nghiệm đầu tiên, lưu lại làm altSolution.
+// - Sau đó khôi phục tableau về trạng thái tối ưu ban đầu để không làm thay đổi
+//   luồng chính của solver.
+//
+// Vì sao cần backup/rollback:
+// - Một số pivot có thể chỉ tạo nghiệm suy biến, tức nghiệm không đổi.
+// - Nếu giữ pivot đó, lịch sử và tableau chính có thể bị sai lệch.
+// - Do đó mỗi lần thử phải có khả năng hoàn tác.
 void SimplexSolver::findAndRecordAlternativeOptimum() {
     int m = tableau.size() - 1;
     int n = tableau[0].size() - 1;
