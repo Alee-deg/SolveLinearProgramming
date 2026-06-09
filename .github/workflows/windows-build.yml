@@ -590,11 +590,187 @@ jobs:
           fi
         fi
 
+
+    - name: 5.1. Tạo gói Linux giải nén có icon và launcher
+      run: |
+        # ============================================================
+        # GÓI LINUX CHO NGƯỜI DÙNG CUỐI
+        # ------------------------------------------------------------
+        # Lưu ý thực tế:
+        # - GNOME/Nautilus thường KHÔNG hiển thị icon nhúng trực tiếp trên file .AppImage.
+        # - Vì vậy gói tải về cần có thêm .desktop launcher + icon PNG đi kèm.
+        # - Khi người dùng giải nén artifact ZIP, họ sẽ thấy thư mục PhanMemQHTT-Linux
+        #   chứa icon, launcher và AppImage.
+        # ============================================================
+
+        PACKAGE_ROOT="Linux_Artifact"
+        RELEASE_DIR="$PACKAGE_ROOT/PhanMemQHTT-Linux"
+        APPIMAGE_NAME="PhanMemQHTT-Linux-x86_64.AppImage"
+        ICON_NAME="PhanMemQHTT.png"
+        DESKTOP_FILE_NAME="Mo_PhanMemQHTT.desktop"
+
+        rm -rf "$PACKAGE_ROOT"
+        mkdir -p "$RELEASE_DIR"
+
+        if [ ! -f "$APPIMAGE_NAME" ]; then
+          echo "[ERROR] Không tìm thấy $APPIMAGE_NAME"
+          exit 1
+        fi
+
+        cp "$APPIMAGE_NAME" "$RELEASE_DIR/$APPIMAGE_NAME"
+        chmod +x "$RELEASE_DIR/$APPIMAGE_NAME"
+
+        # Tạo icon PNG chuẩn để đặt ngay trong thư mục giải nén.
+        # Không dùng ảnh gốc trực tiếp vì kích thước có thể lẻ, ví dụ 1238px.
+        if [ -f "AppDir/SolveLinearProgramming.png" ]; then
+          cp AppDir/SolveLinearProgramming.png "$RELEASE_DIR/$ICON_NAME"
+        elif [ -f "resources/images/logo.png" ]; then
+          convert "resources/images/logo.png" \
+            -resize 256x256 \
+            -background none \
+            -gravity center \
+            -extent 256x256 \
+            "$RELEASE_DIR/$ICON_NAME"
+        else
+          echo "[ERROR] Không tìm thấy icon nguồn để tạo $ICON_NAME"
+          exit 1
+        fi
+
+        # .DirIcon và .directory giúp một số file manager/KDE nhận icon thư mục.
+        cp "$RELEASE_DIR/$ICON_NAME" "$RELEASE_DIR/.DirIcon"
+        cat > "$RELEASE_DIR/.directory" <<EOF
+        [Desktop Entry]
+        Icon=./$ICON_NAME
+        EOF
+
+        # Launcher nằm ngay trong thư mục giải nén.
+        # Dùng %k để lấy đường dẫn của chính file .desktop, từ đó chạy AppImage cùng thư mục.
+        # Icon dùng file PNG cùng thư mục. Một số desktop hỗ trợ relative icon ngay,
+        # một số desktop cần chạy script CaiDat_Icon_Menu.sh để cài vào menu.
+        cat > "$RELEASE_DIR/$DESKTOP_FILE_NAME" <<EOF
+        [Desktop Entry]
+        Type=Application
+        Name=Phần mềm Giải Quy Hoạch Tuyến Tính
+        Comment=Linear Programming Solver
+        Exec=sh -c 'DIR="$(dirname "$(readlink -f "$1")")"; chmod +x "$DIR/$APPIMAGE_NAME"; exec "$DIR/$APPIMAGE_NAME"' sh %k
+        Icon=./$ICON_NAME
+        Terminal=false
+        Categories=Education;Science;Math;
+        StartupWMClass=SolveLinearProgramming
+        EOF
+        chmod +x "$RELEASE_DIR/$DESKTOP_FILE_NAME"
+
+        # Script cài launcher vào menu ứng dụng và Desktop.
+        # Đây là cách chắc chắn nhất để Linux hiển thị icon đúng trên GNOME/Nautilus.
+        cat > "$RELEASE_DIR/CaiDat_Icon_Menu.sh" <<'EOF'
+        #!/usr/bin/env bash
+        set -e
+
+        CURRENT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        APPIMAGE_SRC="$CURRENT_DIR/PhanMemQHTT-Linux-x86_64.AppImage"
+        ICON_SRC="$CURRENT_DIR/PhanMemQHTT.png"
+
+        APP_TITLE="Phần mềm Giải Quy Hoạch Tuyến Tính"
+        APP_EXEC_NAME="PhanMemQHTT.AppImage"
+        ICON_NAME="PhanMemQHTT"
+        DESKTOP_NAME="PhanMemQHTT.desktop"
+
+        INSTALL_BIN_DIR="$HOME/.local/bin"
+        ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
+        DESKTOP_APP_DIR="$HOME/.local/share/applications"
+        DESKTOP_DIR="$HOME/Desktop"
+
+        if [ ! -f "$APPIMAGE_SRC" ]; then
+          echo "[ERROR] Không tìm thấy AppImage: $APPIMAGE_SRC"
+          exit 1
+        fi
+
+        if [ ! -f "$ICON_SRC" ]; then
+          echo "[ERROR] Không tìm thấy icon: $ICON_SRC"
+          exit 1
+        fi
+
+        mkdir -p "$INSTALL_BIN_DIR" "$ICON_DIR" "$DESKTOP_APP_DIR"
+
+        INSTALLED_APPIMAGE="$INSTALL_BIN_DIR/$APP_EXEC_NAME"
+        cp "$APPIMAGE_SRC" "$INSTALLED_APPIMAGE"
+        chmod +x "$INSTALLED_APPIMAGE"
+
+        cp "$ICON_SRC" "$ICON_DIR/$ICON_NAME.png"
+        chmod 644 "$ICON_DIR/$ICON_NAME.png"
+
+        DESKTOP_FILE="$DESKTOP_APP_DIR/$DESKTOP_NAME"
+        cat > "$DESKTOP_FILE" <<EOD
+        [Desktop Entry]
+        Type=Application
+        Name=$APP_TITLE
+        Comment=Linear Programming Solver
+        Exec=$INSTALLED_APPIMAGE
+        Icon=$ICON_NAME
+        Terminal=false
+        Categories=Education;Science;Math;
+        StartupWMClass=SolveLinearProgramming
+        EOD
+        chmod +x "$DESKTOP_FILE"
+
+        if command -v update-desktop-database >/dev/null 2>&1; then
+          update-desktop-database "$DESKTOP_APP_DIR" >/dev/null 2>&1 || true
+        fi
+
+        if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+          gtk-update-icon-cache "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
+        fi
+
+        if [ -d "$DESKTOP_DIR" ]; then
+          cp "$DESKTOP_FILE" "$DESKTOP_DIR/$DESKTOP_NAME"
+          chmod +x "$DESKTOP_DIR/$DESKTOP_NAME"
+
+          if command -v gio >/dev/null 2>&1; then
+            gio set "$DESKTOP_DIR/$DESKTOP_NAME" metadata::trusted true >/dev/null 2>&1 || true
+          fi
+        fi
+
+        echo "[OK] Đã cài launcher có icon."
+        echo "Ứng dụng: $INSTALLED_APPIMAGE"
+        echo "Menu: $DESKTOP_FILE"
+        if [ -d "$DESKTOP_DIR" ]; then
+          echo "Desktop: $DESKTOP_DIR/$DESKTOP_NAME"
+        fi
+        EOF
+        chmod +x "$RELEASE_DIR/CaiDat_Icon_Menu.sh"
+
+        cat > "$RELEASE_DIR/README_Linux.txt" <<EOF
+        HƯỚNG DẪN CHẠY PHẦN MỀM QHTT TRÊN LINUX
+
+        Cách 1 - Chạy trực tiếp:
+        1. Mở thư mục PhanMemQHTT-Linux.
+        2. Chuột phải vào $APPIMAGE_NAME > Properties > Allow executing file as program.
+        3. Mở file $APPIMAGE_NAME.
+
+        Cách 2 - Chạy bằng launcher trong thư mục:
+        1. Mở file $DESKTOP_FILE_NAME.
+        2. Nếu hệ thống hỏi Trust and Launch / Allow Launching thì chọn đồng ý.
+
+        Cách 3 - Cài icon vào menu ứng dụng và Desktop:
+        Mở Terminal trong thư mục này và chạy:
+          chmod +x CaiDat_Icon_Menu.sh
+          ./CaiDat_Icon_Menu.sh
+
+        Ghi chú:
+        - File .AppImage trên GNOME/Nautilus có thể vẫn hiện icon bánh răng.
+        - Launcher .desktop và menu app sau khi cài sẽ hiển thị icon đúng.
+        EOF
+
+        echo "[OK] Linux release folder created:"
+        find "$RELEASE_DIR" -maxdepth 2 -type f -print
+        file "$RELEASE_DIR/$ICON_NAME"
+        identify "$RELEASE_DIR/$ICON_NAME" || true
+
     - name: 6. Upload artifact Linux
       uses: actions/upload-artifact@v4
       with:
         name: PhanMemQHTT-Linux
-        path: PhanMemQHTT-Linux-x86_64.AppImage
+        path: Linux_Artifact/**
         if-no-files-found: error
 
 
