@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 project(SolveLinearProgramming VERSION 0.1 LANGUAGES CXX)
 
 # ======================================================================
-# Cấu hình Qt/C++
+# Qt / C++ config
 # ======================================================================
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
@@ -12,28 +12,22 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Cho phép include header cùng thư mục hiện tại và thư mục build sinh ra ui_*.h
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-# Vì file .ui đã được gom vào thư mục ui/
+# File .ui đã được gom vào thư mục ui/
 set(CMAKE_AUTOUIC_SEARCH_PATHS
     ${CMAKE_CURRENT_SOURCE_DIR}/ui
 )
 
 # ======================================================================
-# Thư viện Qt cần dùng
-# Widgets      : giao diện chính
-# PrintSupport : in / xuất PDF / hỗ trợ QPrinter
-# Network      : gọi API chatbot
-# Svg          : hiển thị icon SVG nếu có
+# Qt components
 # ======================================================================
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets PrintSupport Network Svg)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets PrintSupport Network Svg)
 
 # ======================================================================
-# File nguồn sau khi gom repository
+# Source files sau khi gom thư mục
 # ======================================================================
-
 set(PROJECT_SOURCES
     src/main.cpp
 
@@ -68,17 +62,40 @@ set(PROJECT_SOURCES
     resources/resource.qrc
 )
 
-# File .rc chỉ dành cho Windows. Không đưa vào Linux/macOS để tránh lỗi build.
+# ======================================================================
+# Windows app icon
+# ======================================================================
+# Sau khi restructure, logo.ico đã nằm ở resources/images/logo.ico.
+# Nếu vẫn compile resources/app_icon.rc cũ, windres sẽ báo:
+#   can't open icon file `logo.ico`
+#
+# Cách dưới đây tạo app_icon_generated.rc trong thư mục build bằng đường dẫn
+# tuyệt đối tới logo.ico, nên không phụ thuộc working directory của windres.
+# Hoạt động ổn với GitHub Actions Windows + MinGW.
 if(WIN32)
-    list(APPEND PROJECT_SOURCES
-        resources/app_icon.rc
-    )
+    set(APP_ICON_FILE "${CMAKE_CURRENT_SOURCE_DIR}/resources/images/logo.ico")
+
+    if(EXISTS "${APP_ICON_FILE}")
+        set(GENERATED_APP_ICON_RC "${CMAKE_CURRENT_BINARY_DIR}/app_icon_generated.rc")
+
+        # Dùng path kiểu CMake với dấu "/" để windres đọc được trên Windows.
+        file(TO_CMAKE_PATH "${APP_ICON_FILE}" APP_ICON_FILE_FOR_RC)
+
+        file(WRITE "${GENERATED_APP_ICON_RC}"
+"#include <windows.h>\nIDI_ICON1 ICON DISCARDABLE \"${APP_ICON_FILE_FOR_RC}\"\n"
+        )
+
+        list(APPEND PROJECT_SOURCES
+            "${GENERATED_APP_ICON_RC}"
+        )
+    else()
+        message(WARNING "Không tìm thấy icon Windows: ${APP_ICON_FILE}. File .exe vẫn build được nhưng không có icon app.")
+    endif()
 endif()
 
 # ======================================================================
-# Tạo executable
+# Create executable
 # ======================================================================
-
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     qt_add_executable(SolveLinearProgramming
         MANUAL_FINALIZATION
@@ -98,13 +115,10 @@ endif()
 
 # ======================================================================
 # Include directories
-# Giúp code vẫn dùng được:
-#   #include "simplexsolver.h"
-#   #include "dashboard.h"
-#   #include "ui_dashboard.h"
-# mà không cần sửa hàng loạt include.
+# Giữ nguyên được các dòng include cũ kiểu:
+# #include "simplexsolver.h"
+# #include "dashboard.h"
 # ======================================================================
-
 target_include_directories(SolveLinearProgramming PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
@@ -113,9 +127,8 @@ target_include_directories(SolveLinearProgramming PRIVATE
 )
 
 # ======================================================================
-# Link thư viện Qt
+# Link Qt libraries
 # ======================================================================
-
 target_link_libraries(SolveLinearProgramming PRIVATE
     Qt${QT_VERSION_MAJOR}::Widgets
     Qt${QT_VERSION_MAJOR}::PrintSupport
@@ -124,9 +137,8 @@ target_link_libraries(SolveLinearProgramming PRIVATE
 )
 
 # ======================================================================
-# Thuộc tính app bundle / executable
+# Bundle properties
 # ======================================================================
-
 if(${QT_VERSION} VERSION_LESS 6.1.0)
     set(BUNDLE_ID_OPTION MACOSX_BUNDLE_GUI_IDENTIFIER com.example.SolveLinearProgramming)
 endif()
@@ -140,9 +152,8 @@ set_target_properties(SolveLinearProgramming PROPERTIES
 )
 
 # ======================================================================
-# Cài đặt / đóng gói
+# Install
 # ======================================================================
-
 include(GNUInstallDirs)
 
 install(TARGETS SolveLinearProgramming
@@ -150,10 +161,6 @@ install(TARGETS SolveLinearProgramming
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-
-# ======================================================================
-# Finalize Qt6 executable
-# ======================================================================
 
 if(QT_VERSION_MAJOR EQUAL 6)
     qt_finalize_executable(SolveLinearProgramming)
