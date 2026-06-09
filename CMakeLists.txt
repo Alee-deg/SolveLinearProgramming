@@ -1,46 +1,88 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.16)
 
 project(SolveLinearProgramming VERSION 0.1 LANGUAGES CXX)
 
+# ======================================================================
+# Cấu hình Qt/C++
+# ======================================================================
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-# Thêm thư mục hiện tại vào danh sách tìm kiếm file Header (.h)
+
+# Cho phép include header cùng thư mục hiện tại và thư mục build sinh ra ui_*.h
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-# 1. BỔ SUNG COMPONENTS 'Network' ĐỂ GỌI API VÀ 'Svg' ĐỂ HIỂN THỊ ICON
+# Vì file .ui đã được gom vào thư mục ui/
+set(CMAKE_AUTOUIC_SEARCH_PATHS
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui
+)
+
+# ======================================================================
+# Thư viện Qt cần dùng
+# Widgets      : giao diện chính
+# PrintSupport : in / xuất PDF / hỗ trợ QPrinter
+# Network      : gọi API chatbot
+# Svg          : hiển thị icon SVG nếu có
+# ======================================================================
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets PrintSupport Network Svg)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets PrintSupport Network Svg)
 
-# 2. GOM TẤT CẢ FILE NGUỒN VÀO ĐÂY
+# ======================================================================
+# File nguồn sau khi gom repository
+# ======================================================================
+
 set(PROJECT_SOURCES
-        main.cpp
-        mainwindow.cpp
-        mainwindow.h
-        mainwindow.ui
-        dashboard.h
-        dashboard.cpp
-        dashboard.ui
-        wdsolve.h
-        wdsolve.cpp
-        wdsolve.ui
-        Struct.h
-        simplexsolver.h
-        simplexsolver.cpp
-        qcustomplot.h        # <-- Thêm file header QCustomPlot
-        qcustomplot.cpp      # <-- Thêm file source QCustomPlot
+    src/main.cpp
+
+    src/core/Struct.h
+    src/core/simplexsolver.h
+    src/core/simplexsolver.cpp
+
+    src/windows/mainwindow.h
+    src/windows/mainwindow.cpp
+
+    src/windows/dashboard.h
+    src/windows/dashboard.cpp
+
+    src/windows/wdsolve.h
+    src/windows/wdsolve.cpp
+
+    src/windows/wdchatbot.h
+    src/windows/wdchatbot.cpp
+
+    src/windows/wdshowimage.h
+    src/windows/wdshowimage.cpp
+
+    src/windows/qcustomplot.h
+    src/windows/qcustomplot.cpp
+
+    ui/mainwindow.ui
+    ui/dashboard.ui
+    ui/wdsolve.ui
+    ui/wdchatbot.ui
+    ui/wdshowimage.ui
+
+    resources/resource.qrc
 )
+
+# File .rc chỉ dành cho Windows. Không đưa vào Linux/macOS để tránh lỗi build.
+if(WIN32)
+    list(APPEND PROJECT_SOURCES
+        resources/app_icon.rc
+    )
+endif()
+
+# ======================================================================
+# Tạo executable
+# ======================================================================
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     qt_add_executable(SolveLinearProgramming
         MANUAL_FINALIZATION
         ${PROJECT_SOURCES}
-        resource.qrc
-        wdshowimage.h wdshowimage.cpp wdshowimage.ui
-        wdchatbot.h wdchatbot.cpp wdchatbot.ui app_icon.rc
     )
 else()
     if(ANDROID)
@@ -54,16 +96,39 @@ else()
     endif()
 endif()
 
-# 3. LIÊN KẾT THƯ VIỆN NETWORK, PRINTSUPPORT VÀ SVG VÀO TARGET CHÍNH
+# ======================================================================
+# Include directories
+# Giúp code vẫn dùng được:
+#   #include "simplexsolver.h"
+#   #include "dashboard.h"
+#   #include "ui_dashboard.h"
+# mà không cần sửa hàng loạt include.
+# ======================================================================
+
+target_include_directories(SolveLinearProgramming PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/windows
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui
+)
+
+# ======================================================================
+# Link thư viện Qt
+# ======================================================================
+
 target_link_libraries(SolveLinearProgramming PRIVATE
     Qt${QT_VERSION_MAJOR}::Widgets
     Qt${QT_VERSION_MAJOR}::PrintSupport
     Qt${QT_VERSION_MAJOR}::Network
-    Qt${QT_VERSION_MAJOR}::Svg           # <-- Đã thêm thư viện Svg ở đây để load icon
+    Qt${QT_VERSION_MAJOR}::Svg
 )
 
+# ======================================================================
+# Thuộc tính app bundle / executable
+# ======================================================================
+
 if(${QT_VERSION} VERSION_LESS 6.1.0)
-  set(BUNDLE_ID_OPTION MACOSX_BUNDLE_GUI_IDENTIFIER com.example.SolveLinearProgramming)
+    set(BUNDLE_ID_OPTION MACOSX_BUNDLE_GUI_IDENTIFIER com.example.SolveLinearProgramming)
 endif()
 
 set_target_properties(SolveLinearProgramming PROPERTIES
@@ -74,12 +139,21 @@ set_target_properties(SolveLinearProgramming PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
 
+# ======================================================================
+# Cài đặt / đóng gói
+# ======================================================================
+
 include(GNUInstallDirs)
+
 install(TARGETS SolveLinearProgramming
     BUNDLE DESTINATION .
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+# ======================================================================
+# Finalize Qt6 executable
+# ======================================================================
 
 if(QT_VERSION_MAJOR EQUAL 6)
     qt_finalize_executable(SolveLinearProgramming)
