@@ -4,6 +4,7 @@
 #include "simplexsolver.h"
 #include <QString>
 #include <QMessageBox>
+#include <QDialog>
 #include <QTextEdit>
 #include <QSettings>
 #include <QDir>
@@ -27,172 +28,10 @@
 #include <QProcessEnvironment>
 #include <QPointer>
 #include <QTimer>
+#include <QRect>
 #include <QProgressDialog>
 #include <cmath>
 #include <algorithm>
-#include <QIcon>
-#include <QApplication>
-#include <QStringList>
-#include <QWindow>
-#include <QVariant>
-#ifdef Q_OS_WIN
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
-
-
-// =======================================================================
-// [FIX ICON TASKBAR - WINDOWS / MACOS / LINUX]
-// Lý do lỗi cũ:
-// - MainWindow có icon, nhưng Dashboard / WdSolve / WdChatBot / WdShowImage
-//   được mở như cửa sổ top-level khác.
-// - Trên Windows, nếu cửa sổ mới không có icon native riêng hoặc là owned window
-//   của MainWindow đang bị hide, taskbar có thể mất icon hoặc hiện icon mặc định.
-//
-// Cách xử lý:
-// 1. Tải icon từ Qt Resource với nhiều đường dẫn fallback.
-// 2. Set icon cho QApplication và từng top-level window.
-// 3. Trên Windows, ép thêm icon native bằng WM_SETICON từ resource icon của .exe.
-// 4. Các cửa sổ chuyển màn hình sẽ được tạo với parent = nullptr để không trở
-//    thành owned window bị phụ thuộc taskbar vào MainWindow.
-// =======================================================================
-static QIcon phanMemQHTTAppIcon()
-{
-    const QStringList resourceCandidates = {
-        ":/logo.png",
-        ":/new/prefix1/logo.png",
-        ":/logo.ico",
-        ":/new/prefix1/logo.ico",
-        ":/Logo TA Ngang.png",
-        ":/new/prefix1/Logo TA Ngang.png"
-    };
-
-    for (const QString& path : resourceCandidates) {
-        if (QFile::exists(path)) {
-            QIcon icon(path);
-            if (!icon.isNull()) {
-                if (qApp) {
-                    qApp->setWindowIcon(icon);
-                }
-                return icon;
-            }
-        }
-    }
-
-    if (qApp && !qApp->windowIcon().isNull()) {
-        return qApp->windowIcon();
-    }
-
-    return QIcon();
-}
-
-#ifdef Q_OS_WIN
-static HICON phanMemQHTTLoadWindowsResourceIcon(int width, int height)
-{
-    HINSTANCE instance = GetModuleHandleW(nullptr);
-
-    HICON icon = reinterpret_cast<HICON>(
-        LoadImageW(instance, L"IDI_ICON1", IMAGE_ICON, width, height, LR_DEFAULTCOLOR)
-        );
-
-    if (!icon) {
-        icon = reinterpret_cast<HICON>(
-            LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, width, height, LR_DEFAULTCOLOR)
-            );
-    }
-
-    if (!icon) {
-        icon = reinterpret_cast<HICON>(
-            LoadImageW(instance, MAKEINTRESOURCEW(101), IMAGE_ICON, width, height, LR_DEFAULTCOLOR)
-            );
-    }
-
-    return icon;
-}
-
-static void applyPhanMemQHTTNativeWindowsIcon(QWidget *window)
-{
-    if (!window) return;
-
-    HWND hwnd = reinterpret_cast<HWND>(window->winId());
-    if (!hwnd) return;
-
-    HICON bigIcon = phanMemQHTTLoadWindowsResourceIcon(
-        GetSystemMetrics(SM_CXICON),
-        GetSystemMetrics(SM_CYICON)
-        );
-
-    HICON smallIcon = phanMemQHTTLoadWindowsResourceIcon(
-        GetSystemMetrics(SM_CXSMICON),
-        GetSystemMetrics(SM_CYSMICON)
-        );
-
-    if (bigIcon) {
-        SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(bigIcon));
-        SetClassLongPtrW(hwnd, GCLP_HICON, reinterpret_cast<LONG_PTR>(bigIcon));
-    }
-
-    if (smallIcon) {
-        SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(smallIcon));
-        SetClassLongPtrW(hwnd, GCLP_HICONSM, reinterpret_cast<LONG_PTR>(smallIcon));
-    }
-}
-#endif
-
-static void applyPhanMemQHTTWindowIcon(QWidget *window)
-{
-    if (!window) return;
-
-    const QIcon icon = phanMemQHTTAppIcon();
-    if (!icon.isNull()) {
-        window->setWindowIcon(icon);
-
-        if (window->windowHandle()) {
-            window->windowHandle()->setIcon(icon);
-        }
-    }
-
-#ifdef Q_OS_WIN
-    // Ép tạo native handle và set icon lại sau khi Qt đã tạo cửa sổ thật.
-    applyPhanMemQHTTNativeWindowsIcon(window);
-
-    QPointer<QWidget> safeWindow(window);
-    QTimer::singleShot(0, window, [safeWindow, icon]() {
-        if (!safeWindow) return;
-
-        if (!icon.isNull()) {
-            safeWindow->setWindowIcon(icon);
-            if (safeWindow->windowHandle()) {
-                safeWindow->windowHandle()->setIcon(icon);
-            }
-        }
-
-        applyPhanMemQHTTNativeWindowsIcon(safeWindow.data());
-    });
-#endif
-}
-
-static void setPhanMemQHTTReturnWindow(QWidget *childWindow, QWidget *returnWindow)
-{
-    if (!childWindow || !returnWindow) return;
-    childWindow->setProperty("phanMemQHTT_returnWindow",
-                             QVariant::fromValue<QObject*>(returnWindow));
-}
-
-static QWidget* phanMemQHTTReturnWindow(QWidget *currentWindow)
-{
-    if (!currentWindow) return nullptr;
-
-    QObject *returnObject =
-        currentWindow->property("phanMemQHTT_returnWindow").value<QObject*>();
-
-    QWidget *returnWidget = qobject_cast<QWidget*>(returnObject);
-    if (returnWidget) return returnWidget;
-
-    return currentWindow->parentWidget();
-}
 
 
 // =======================================================================
@@ -200,6 +39,35 @@ static QWidget* phanMemQHTTReturnWindow(QWidget *currentWindow)
 // sau đó mới fallback về applicationDirPath. Cách này giúp bản Linux/AppImage
 // không bị lệch theme giữa MainWindow, màn hình kết quả và cửa sổ xem PDF.
 // =======================================================================
+
+// =======================================================================
+// [FIX PDF PREVIEW TITLE BAR BUTTONS]
+// Cửa sổ xem PDF chỉ giữ lại:
+// - nút phóng to/khôi phục
+// - nút đóng
+// Không hiển thị nút minimize "-".
+//
+// Với một số hệ điều hành/window manager, chỉ set flags lúc tạo dialog là
+// chưa đủ, vì vậy hàm này phải được gọi lại ngay trước mỗi lần show().
+// =======================================================================
+static void applyPdfPreviewTitleBarButtons(QDialog *dialog)
+{
+    if (!dialog) return;
+
+    Qt::WindowFlags flags = Qt::Window;
+    flags |= Qt::CustomizeWindowHint;
+    flags |= Qt::WindowTitleHint;
+    flags |= Qt::WindowMaximizeButtonHint;
+    flags |= Qt::WindowCloseButtonHint;
+
+    flags &= ~Qt::WindowMinimizeButtonHint;
+    flags &= ~Qt::WindowSystemMenuHint;
+
+    dialog->setWindowFlags(flags);
+}
+
+
+
 static bool readDarkModeSetting()
 {
     QString appDataSettingsPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/settings.ini";
@@ -439,10 +307,6 @@ WdSolve::WdSolve(QWidget *parent)
 {
     ui->setupUi(this);
 
-    // WdSolve là cửa sổ kết quả độc lập để taskbar Windows luôn nhận icon riêng.
-    this->setWindowFlag(Qt::Window, true);
-    applyPhanMemQHTTWindowIcon(this);
-
     // =======================================================================
     // [FIX GIAO DIỆN]
     // =======================================================================
@@ -450,7 +314,7 @@ WdSolve::WdSolve(QWidget *parent)
 
     this->setWindowTitle("Kết quả tính toán");
     this->setWindowState(Qt::WindowMaximized);
-    applyPhanMemQHTTWindowIcon(this);
+    this->setWindowIcon(QIcon(":/logo.png"));
 
     this->wd_show    = nullptr;
     this->wd_ChatBot = nullptr;
@@ -1507,9 +1371,56 @@ WdSolve::WdSolve(QWidget *parent)
         tex += "\\end{document}";
 
 
-        QDialog *previewDialog = new QDialog(this);
-        applyPhanMemQHTTWindowIcon(previewDialog);
+        // [FIX PREVIEW PDF - REUSE WINDOW]
+        // Chỉ tạo cửa sổ xem PDF một lần trong suốt phiên chạy app.
+        // Nếu người dùng bấm "Xem lời giải ở dạng PDF" từ lần thứ 2 trở đi,
+        // phần mềm chỉ thay nội dung HTML/.tex hiện tại, không mở thêm cửa sổ mới.
+        static QPointer<QDialog> previewDialog;
+        static bool previewDialogHasOpenedOnce = false;
+        static QRect previewDialogLastGeometry;
+        static QPointer<QTextBrowser> previewBrowser;
+
+        if (previewDialog && previewBrowser) {
+            // Nếu cửa sổ preview đã tồn tại, chỉ thay nội dung.
+            // Không tạo dialog mới và không maximize lại.
+            if (previewDialog->isVisible()) {
+                previewDialogLastGeometry = previewDialog->geometry();
+            }
+
+            previewDialog->setProperty("currentHtml", html);
+            previewDialog->setProperty("currentTex", tex);
+            previewBrowser->setHtml(html);
+
+            // Giữ nguyên vị trí/kích thước người dùng đã chỉnh trước đó.
+            if (!previewDialogLastGeometry.isNull()) {
+                previewDialog->setGeometry(previewDialogLastGeometry);
+            }
+
+            applyPdfPreviewTitleBarButtons(previewDialog);
+            previewDialog->showNormal();
+            previewDialog->raise();
+            previewDialog->activateWindow();
+            return;
+        }
+
+        previewDialog = new QDialog(this);
+        previewDialog->setAttribute(Qt::WA_DeleteOnClose, true);
         previewDialog->setWindowTitle("Xem lời giải với PDF");
+        applyPdfPreviewTitleBarButtons(previewDialog);
+
+        // [FIX PDF PREVIEW TITLEBAR]
+        // Bỏ nút minimize "-" vì khi minimize/restore dialog preview có thể gây lệch trạng thái.
+        // Giữ nút close và maximize.
+        applyPdfPreviewTitleBarButtons(previewDialog);
+
+        QObject::connect(previewDialog, &QDialog::finished, previewDialog, []() {
+            if (previewDialog) {
+                previewDialogLastGeometry = previewDialog->geometry();
+            }
+        });
+        QObject::connect(previewDialog, &QObject::destroyed, previewDialog, []() {
+            previewDialog.clear();
+        });
         // [FIX PREVIEW WINDOW]
         // Không dùng chiều cao 880 cố định vì trên nhiều máy sau khi tải app,
         // dialog có thể bị taskbar che mất thanh nút phía dưới.
@@ -1526,10 +1437,14 @@ WdSolve::WdSolve(QWidget *parent)
             previewDialog->setStyleSheet("QDialog { background-color: #F5F7FA; } QPushButton { background-color: #FFFFFF; color: #333333; border: 1px solid #CCCCCC; border-radius: 4px; padding: 6px 15px; font-weight: bold; } QPushButton:hover { background-color: #E8E8E8; }");
         }
 
-        QTextBrowser *previewBrowser = new QTextBrowser(previewDialog);
+        previewBrowser = new QTextBrowser(previewDialog);
         previewBrowser->setStyleSheet("QTextBrowser { background-color: #FFFFFF; color: #000000; padding: 28px 36px; border-radius: 4px; border: 1px solid #BDBDBD;}");
         previewBrowser->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         previewBrowser->setMinimumHeight(0);
+
+        // Lưu nội dung hiện tại vào dialog để các nút tải xuống luôn dùng dữ liệu mới nhất.
+        previewDialog->setProperty("currentHtml", html);
+        previewDialog->setProperty("currentTex", tex);
         previewBrowser->setHtml(html);
         dlgLayout->addWidget(previewBrowser, 1);
 
@@ -1547,8 +1462,8 @@ WdSolve::WdSolve(QWidget *parent)
         btnPreviewLayout->addWidget(btnDownloadPdf);
         btnPreviewLayout->addWidget(btnDownloadTex);
         dlgLayout->addLayout(btnPreviewLayout, 0);
-
-        connect(btnDownloadTex, &QPushButton::clicked, previewDialog, [previewDialog, tex]() {
+        connect(btnDownloadTex, &QPushButton::clicked, previewDialog, []() {
+            QString tex = previewDialog ? previewDialog->property("currentTex").toString() : QString();
             QString fileName = QFileDialog::getSaveFileName(previewDialog, "Lưu file LaTeX", "BaoCao_QHTT.tex", "LaTeX Files (*.tex)");
             if (!fileName.isEmpty()) {
                 QFile file(fileName);
@@ -1562,7 +1477,9 @@ WdSolve::WdSolve(QWidget *parent)
             }
         });
 
-        connect(btnDownloadPdf, &QPushButton::clicked, previewDialog, [previewDialog, tex, html]() {
+        connect(btnDownloadPdf, &QPushButton::clicked, previewDialog, []() {
+            QString tex = previewDialog ? previewDialog->property("currentTex").toString() : QString();
+            QString html = previewDialog ? previewDialog->property("currentHtml").toString() : QString();
             QString fileName = QFileDialog::getSaveFileName(
                 previewDialog,
                 "Lưu file PDF",
@@ -1827,10 +1744,22 @@ WdSolve::WdSolve(QWidget *parent)
         });
 
         // [FIX PREVIEW WINDOW]
-        // Mở maximized để luôn thấy thanh nút dưới cùng và không bị taskbar che khuất.
-        previewDialog->setWindowState(previewDialog->windowState() | Qt::WindowMaximized);
-        previewDialog->exec();
-        delete previewDialog;
+        // Chỉ tự maximize đúng lần đầu tiên sau khi mở app.
+        // Các lần mở/click sau sẽ giữ nguyên vị trí và kích thước mà người dùng đã chỉnh.
+        // Dùng show() thay vì exec() để cửa sổ xem PDF không khóa cửa sổ kết quả.
+        applyPdfPreviewTitleBarButtons(previewDialog);
+        if (!previewDialogHasOpenedOnce) {
+            previewDialog->showMaximized();
+            previewDialogHasOpenedOnce = true;
+        } else {
+            if (!previewDialogLastGeometry.isNull()) {
+                previewDialog->setGeometry(previewDialogLastGeometry);
+            }
+            previewDialog->showNormal();
+        }
+
+        previewDialog->raise();
+        previewDialog->activateWindow();
     });
 }
 
@@ -2626,12 +2555,8 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
 void WdSolve::on_pushButton_clicked()
 {
-    QWidget *returnWindow = phanMemQHTTReturnWindow(this);
-    if (returnWindow) {
-        applyPhanMemQHTTWindowIcon(returnWindow);
-        returnWindow->show();
-        returnWindow->raise();
-        returnWindow->activateWindow();
+    if (this->parentWidget()) {
+        this->parentWidget()->show();
     }
     this->hide();
 }
@@ -2640,14 +2565,8 @@ void WdSolve::on_pushButton_2_clicked()
 {
     if (this->currentOriginalLp.c.size() == 2) {
         if (!this->wd_show) {
-            // Không truyền this làm parent để cửa sổ hình học có icon riêng trên taskbar.
-            this->wd_show = new WdShowImage(nullptr);
-            setPhanMemQHTTReturnWindow(this->wd_show, this);
-            applyPhanMemQHTTWindowIcon(this->wd_show);
+            this->wd_show = new WdShowImage(this);
         }
-
-        setPhanMemQHTTReturnWindow(this->wd_show, this);
-        applyPhanMemQHTTWindowIcon(this->wd_show);
 
         this->wd_show->drawGraph(currentLp, currentOriginalLp,
                                  currentSolution, this->currentHistory);
@@ -3036,15 +2955,7 @@ void WdSolve::on_pushButton_3_clicked()
     contextString += "Nếu người dùng hỏi về nghiệm tối ưu hoặc giá trị tối ưu, hãy đối chiếu cả mục 4, bảng nghiệm đang hiển thị, và các bước thực thi trước khi trả lời.\n";
     contextString += "QUAN TRỌNG: Nếu người dùng hỏi bất kỳ câu hỏi ngoài lề (không thuộc phạm vi của bài toán hoặc quy hoạch tuyến tính), bạn KHÔNG ĐƯỢC trả lời nội dung đó. Bạn BẮT BUỘC phải trả lời chính xác bằng câu sau và không giải thích gì thêm:\n\"Xin lỗi câu hỏi của bạn không thuộc phạm vi của bài toán\"";
 
-    if (!this->wd_ChatBot) {
-        // Không truyền this làm parent để ChatBot có icon riêng trên taskbar.
-        this->wd_ChatBot = new WdChatBot(nullptr);
-        setPhanMemQHTTReturnWindow(this->wd_ChatBot, this);
-        applyPhanMemQHTTWindowIcon(this->wd_ChatBot);
-    }
-
-    setPhanMemQHTTReturnWindow(this->wd_ChatBot, this);
-    applyPhanMemQHTTWindowIcon(this->wd_ChatBot);
+    if (!this->wd_ChatBot) this->wd_ChatBot = new WdChatBot(this);
 
     this->wd_ChatBot->setProblemContext(contextString);
     this->wd_ChatBot->show();
