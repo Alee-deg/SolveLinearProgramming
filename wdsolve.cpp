@@ -857,8 +857,8 @@ WdSolve::WdSolve(QWidget *parent)
         Q_UNUSED(bundledFontDir);
         tex += "\\IfFontExistsTF{Times New Roman}{\\setmainfont{Times New Roman}}{\n";
         tex += "\\IfFontExistsTF{Arial}{\\setmainfont{Arial}}{\\setmainfont{Latin Modern Roman}}}\n";
-#else
-        // Linux/macOS vẫn ưu tiên Noto Serif đóng gói kèm app để PDF tiếng Việt ổn định.
+#else \
+    // Linux/macOS vẫn ưu tiên Noto Serif đóng gói kèm app để PDF tiếng Việt ổn định.
         if (!bundledFontDir.isEmpty()) {
             tex += "\\setmainfont{NotoSerif}[\n";
             tex += "  Path={" + bundledFontDir + "},\n";
@@ -872,10 +872,10 @@ WdSolve::WdSolve(QWidget *parent)
             tex += "\\IfFontExistsTF{DejaVu Serif}{\\setmainfont{DejaVu Serif}}{\n";
             tex += "\\IfFontExistsTF{Times New Roman}{\\setmainfont{Times New Roman}}{\\setmainfont{Latin Modern Roman}}}}\n";
         }
-#endif
-        // [FIX REPORT PDF - TRÌNH BÀY CHUYÊN NGHIỆP] \
-        // Cấu hình trang theo kiểu báo cáo khoa học: lề rõ, header/footer, \
-        // tiêu đề mục có đường kẻ, tiêu đề từng từ vựng có khung nhẹ.
+#endif \
+    // [FIX REPORT PDF - TRÌNH BÀY CHUYÊN NGHIỆP] \ \
+    // Cấu hình trang theo kiểu báo cáo khoa học: lề rõ, header/footer, \ \
+    // tiêu đề mục có đường kẻ, tiêu đề từng từ vựng có khung nhẹ.
         tex += "\\geometry{left=22mm,right=22mm,top=20mm,bottom=22mm,headheight=15pt,headsep=7mm,footskip=10mm}\n";
         tex += "\\definecolor{ReportBlue}{HTML}{1F4E79}\n";
         tex += "\\definecolor{ReportGray}{HTML}{F4F7FB}\n";
@@ -1112,9 +1112,10 @@ WdSolve::WdSolve(QWidget *parent)
             // Dòng xuống tiếp theo chỉ in phần còn lại của vế phải, KHÔNG lặp lại
             // biến cơ sở, dấu "=" và hằng số tự do để bảng gọn và dễ đọc.
             const int maxTermColumnsPerLine = 10;
+            const int visibleTermColumns = std::max(1, std::min(maxTermColumnsPerLine, (int)nonBasicVars.size()));
 
             QString colSpec = "r@{\\;}c@{\\;}r";
-            for (int s = 0; s < maxTermColumnsPerLine; ++s) {
+            for (int s = 0; s < visibleTermColumns; ++s) {
                 colSpec += "@{\\quad}c@{\\;}r@{\\;}l";
             }
 
@@ -1125,7 +1126,7 @@ WdSolve::WdSolve(QWidget *parent)
             bool separatorPrinted = false;
 
             auto appendEmptyTermSlots = [&](int usedSlots) {
-                for (int pad = usedSlots; pad < maxTermColumnsPerLine; ++pad) {
+                for (int pad = usedSlots; pad < visibleTermColumns; ++pad) {
                     tex += " &  &  & ";
                 }
             };
@@ -1341,8 +1342,14 @@ WdSolve::WdSolve(QWidget *parent)
 
         QDialog *previewDialog = new QDialog(this);
         previewDialog->setWindowTitle("Xem lời giải với PDF");
-        previewDialog->resize(1250, 880);
+        // [FIX PREVIEW WINDOW]
+        // Không dùng chiều cao 880 cố định vì trên nhiều máy sau khi tải app,
+        // dialog có thể bị taskbar che mất thanh nút phía dưới.
+        previewDialog->resize(1150, 700);
+        previewDialog->setMinimumSize(850, 560);
         QVBoxLayout *dlgLayout = new QVBoxLayout(previewDialog);
+        dlgLayout->setContentsMargins(10, 10, 10, 10);
+        dlgLayout->setSpacing(8);
 
         bool isDark = readDarkModeSetting();
         if (isDark) {
@@ -1353,17 +1360,25 @@ WdSolve::WdSolve(QWidget *parent)
 
         QTextBrowser *previewBrowser = new QTextBrowser(previewDialog);
         previewBrowser->setStyleSheet("QTextBrowser { background-color: #FFFFFF; color: #000000; padding: 28px 36px; border-radius: 4px; border: 1px solid #BDBDBD;}");
+        previewBrowser->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        previewBrowser->setMinimumHeight(0);
         previewBrowser->setHtml(html);
-        dlgLayout->addWidget(previewBrowser);
+        dlgLayout->addWidget(previewBrowser, 1);
 
         QHBoxLayout *btnPreviewLayout = new QHBoxLayout();
+        btnPreviewLayout->setContentsMargins(0, 0, 0, 0);
+        btnPreviewLayout->setSpacing(8);
         QPushButton *btnDownloadPdf = new QPushButton("📥 Tải xuống PDF", previewDialog);
         QPushButton *btnDownloadTex = new QPushButton("📥 Tải xuống .tex", previewDialog);
+        btnDownloadPdf->setMinimumHeight(36);
+        btnDownloadTex->setMinimumHeight(36);
+        btnDownloadPdf->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        btnDownloadTex->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
         btnPreviewLayout->addStretch();
         btnPreviewLayout->addWidget(btnDownloadPdf);
         btnPreviewLayout->addWidget(btnDownloadTex);
-        dlgLayout->addLayout(btnPreviewLayout);
+        dlgLayout->addLayout(btnPreviewLayout, 0);
 
         connect(btnDownloadTex, &QPushButton::clicked, previewDialog, [previewDialog, tex]() {
             QString fileName = QFileDialog::getSaveFileName(previewDialog, "Lưu file LaTeX", "BaoCao_QHTT.tex", "LaTeX Files (*.tex)");
@@ -1643,6 +1658,9 @@ WdSolve::WdSolve(QWidget *parent)
             timeoutTimer->start(600000); // 10 phút cho lần đầu Tectonic tải cache.
         });
 
+        // [FIX PREVIEW WINDOW]
+        // Mở maximized để luôn thấy thanh nút dưới cùng và không bị taskbar che khuất.
+        previewDialog->setWindowState(previewDialog->windowState() | Qt::WindowMaximized);
         previewDialog->exec();
         delete previewDialog;
     });
