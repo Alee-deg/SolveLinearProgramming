@@ -9,6 +9,38 @@
 #include <QPushButton>
 #include <QFile>
 
+// =======================================================================
+// [FIX ICON ĐỒNG BỘ TOÀN BỘ CỬA SỔ]
+// Mỗi cửa sổ top-level phải có icon riêng. Nếu chỉ set icon ở MainWindow,
+// khi chuyển sang Dashboard / WdSolve / ChatBot / cửa sổ xem hình, Windows
+// có thể lấy icon mặc định hoặc làm mất icon trên taskbar.
+// Hàm dưới đây lấy icon chung từ QApplication; nếu chưa có thì fallback về
+// icon đã nhúng trong resource.qrc theo alias ":/logo.png".
+// =======================================================================
+static QIcon phanMemQHTTAppIcon()
+{
+    QIcon icon = qApp ? qApp->windowIcon() : QIcon();
+
+    if (icon.isNull()) {
+        icon = QIcon(":/logo.png");
+        if (qApp) {
+            qApp->setWindowIcon(icon);
+        }
+    }
+
+    return icon;
+}
+
+static void applyPhanMemQHTTWindowIcon(QWidget *window)
+{
+    if (!window) return;
+
+    const QIcon icon = phanMemQHTTAppIcon();
+    if (!icon.isNull()) {
+        window->setWindowIcon(icon);
+    }
+}
+
 // THÊM THƯ VIỆN ĐỂ LƯU FILE XUYÊN HỆ ĐIỀU HÀNH
 #include <QStandardPaths>
 #include <QDir>
@@ -177,7 +209,7 @@ MainWindow::MainWindow(QWidget *parent)
     this->dashboard = nullptr;
     this->setWindowTitle("Phần mềm giải Quy Hoạch Tuyến Tính - Ver 1.0");
     this->setWindowState(Qt::WindowMaximized);
-    this->setWindowIcon(QIcon(":/logo.png"));
+    applyPhanMemQHTTWindowIcon(this);
 }
 
 MainWindow::~MainWindow()
@@ -203,11 +235,13 @@ void MainWindow::on_pushButton_3_clicked()
         // 2. CHỈ TẠO MỚI NẾU CHƯA TỒN TẠI (Giúp giữ nguyên giao diện cũ)
         if (!this->dashboard) {
             this->dashboard = new Dashboard(this);
+            applyPhanMemQHTTWindowIcon(this->dashboard);
             connect(this->dashboard, &Dashboard::destroyed, this, [this](){
                 this->dashboard = nullptr;
             });
         }
 
+        applyPhanMemQHTTWindowIcon(this->dashboard);
         this->dashboard->show();
 
         // 3. Làm sáng dần Dashboard (Fade-in)
@@ -227,6 +261,7 @@ void MainWindow::on_pushButton_3_clicked()
 void MainWindow::on_btnGioiThieu_clicked()
 {
     QDialog *policyDialog = new QDialog(this);
+    applyPhanMemQHTTWindowIcon(policyDialog);
     policyDialog->setWindowTitle("Giới thiệu");
     policyDialog->resize(1150, 1050);
 
@@ -308,6 +343,7 @@ void MainWindow::on_btnGioiThieu_clicked()
 void MainWindow::on_btnChinhSach_clicked()
 {
     QDialog *policyDialog = new QDialog(this);
+    applyPhanMemQHTTWindowIcon(policyDialog);
     policyDialog->setWindowTitle("Chính sách sử dụng");
     policyDialog->resize(1150, 1050);
 

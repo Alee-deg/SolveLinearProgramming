@@ -15,6 +15,7 @@ int main(int argc, char *argv[])
     a.setStyle(QStyleFactory::create("windowsvista"));
 
     MainWindow w;
+    w.setWindowIcon(QIcon(":/logo.png"));
     w.show();
     return a.exec();
 }

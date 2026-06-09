@@ -10,6 +10,40 @@
 #include <QUrl>
 #include <QSettings>
 #include <QCoreApplication>
+#include <QIcon>
+#include <QApplication>
+
+// =======================================================================
+// [FIX ICON ĐỒNG BỘ TOÀN BỘ CỬA SỔ]
+// Mỗi cửa sổ top-level phải có icon riêng. Nếu chỉ set icon ở MainWindow,
+// khi chuyển sang Dashboard / WdSolve / ChatBot / cửa sổ xem hình, Windows
+// có thể lấy icon mặc định hoặc làm mất icon trên taskbar.
+// Hàm dưới đây lấy icon chung từ QApplication; nếu chưa có thì fallback về
+// icon đã nhúng trong resource.qrc theo alias ":/logo.png".
+// =======================================================================
+static QIcon phanMemQHTTAppIcon()
+{
+    QIcon icon = qApp ? qApp->windowIcon() : QIcon();
+
+    if (icon.isNull()) {
+        icon = QIcon(":/logo.png");
+        if (qApp) {
+            qApp->setWindowIcon(icon);
+        }
+    }
+
+    return icon;
+}
+
+static void applyPhanMemQHTTWindowIcon(QWidget *window)
+{
+    if (!window) return;
+
+    const QIcon icon = phanMemQHTTAppIcon();
+    if (!icon.isNull()) {
+        window->setWindowIcon(icon);
+    }
+}
 
 // THÊM THƯ VIỆN ĐỂ LƯU FILE XUYÊN HỆ ĐIỀU HÀNH
 #include <QStandardPaths>
@@ -90,6 +124,11 @@ WdChatBot::WdChatBot(QWidget *parent)
     , ui(new Ui::WdChatBot)
 {
     ui->setupUi(this);
+
+    // Đảm bảo cửa sổ ChatBot là top-level window có icon riêng trên taskbar
+    this->setWindowFlag(Qt::Window, true);
+    applyPhanMemQHTTWindowIcon(this);
+
     this->isFirstMessage = true;
 
     // Xóa stylesheet cục bộ để kế thừa tự động toàn bộ css từ MainWindow
@@ -100,7 +139,7 @@ WdChatBot::WdChatBot(QWidget *parent)
     connect(ui->inputField, &QLineEdit::returnPressed, this, &WdChatBot::onUserSendMessage);
     this->setWindowTitle("Hỏi/Đáp");
     this->setWindowState(Qt::WindowMaximized);
-    this->setWindowIcon(QIcon(":/logo.png"));
+    applyPhanMemQHTTWindowIcon(this);
 }
 
 WdChatBot::~WdChatBot()

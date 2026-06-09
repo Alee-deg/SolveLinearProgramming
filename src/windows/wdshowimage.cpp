@@ -5,6 +5,39 @@
 #include <QApplication>
 #include <QStandardPaths> // Thư viện để đọc đường dẫn AppData
 #include <QDir>
+#include <QIcon>
+
+// =======================================================================
+// [FIX ICON ĐỒNG BỘ TOÀN BỘ CỬA SỔ]
+// Mỗi cửa sổ top-level phải có icon riêng. Nếu chỉ set icon ở MainWindow,
+// khi chuyển sang Dashboard / WdSolve / ChatBot / cửa sổ xem hình, Windows
+// có thể lấy icon mặc định hoặc làm mất icon trên taskbar.
+// Hàm dưới đây lấy icon chung từ QApplication; nếu chưa có thì fallback về
+// icon đã nhúng trong resource.qrc theo alias ":/logo.png".
+// =======================================================================
+static QIcon phanMemQHTTAppIcon()
+{
+    QIcon icon = qApp ? qApp->windowIcon() : QIcon();
+
+    if (icon.isNull()) {
+        icon = QIcon(":/logo.png");
+        if (qApp) {
+            qApp->setWindowIcon(icon);
+        }
+    }
+
+    return icon;
+}
+
+static void applyPhanMemQHTTWindowIcon(QWidget *window)
+{
+    if (!window) return;
+
+    const QIcon icon = phanMemQHTTAppIcon();
+    if (!icon.isNull()) {
+        window->setWindowIcon(icon);
+    }
+}
 
 // =======================================================================
 // HÀM TIỆN ÍCH
@@ -30,9 +63,14 @@ WdShowImage::WdShowImage(QWidget *parent)
     , ui(new Ui::WdShowImage)
 {
     ui->setupUi(this);
+
+    // Đảm bảo cửa sổ biểu diễn hình học là top-level window có icon riêng trên taskbar
+    this->setWindowFlag(Qt::Window, true);
+    applyPhanMemQHTTWindowIcon(this);
+
     this->setWindowTitle("Biểu diễn hình học miền nghiệm");
     this->setWindowState(Qt::WindowMaximized); // Mở cửa sổ ở chế độ toàn màn hình
-    this->setWindowIcon(QIcon(":/logo.png"));
+    applyPhanMemQHTTWindowIcon(this);
 }
 
 WdShowImage::~WdShowImage()
@@ -43,7 +81,10 @@ WdShowImage::~WdShowImage()
 // Nút quay lại (Back): Hiển thị lại cửa sổ cha và đóng cửa sổ hiện tại
 void WdShowImage::on_pushButton_clicked()
 {
-    if (this->parentWidget()) this->parentWidget()->show();
+    if (this->parentWidget()) {
+        applyPhanMemQHTTWindowIcon(this->parentWidget());
+        this->parentWidget()->show();
+    }
     this->close();
 }
 

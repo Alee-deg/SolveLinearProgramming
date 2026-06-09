@@ -30,7 +30,41 @@
 #include <QProgressDialog>
 #include <cmath>
 #include <algorithm>
+#include <QIcon>
+#include <QApplication>
 
+
+// =======================================================================
+// [FIX ICON ĐỒNG BỘ TOÀN BỘ CỬA SỔ]
+// Mỗi cửa sổ top-level phải có icon riêng. Nếu chỉ set icon ở MainWindow,
+// khi chuyển sang Dashboard / WdSolve / ChatBot / cửa sổ xem hình, Windows
+// có thể lấy icon mặc định hoặc làm mất icon trên taskbar.
+// Hàm dưới đây lấy icon chung từ QApplication; nếu chưa có thì fallback về
+// icon đã nhúng trong resource.qrc theo alias ":/logo.png".
+// =======================================================================
+static QIcon phanMemQHTTAppIcon()
+{
+    QIcon icon = qApp ? qApp->windowIcon() : QIcon();
+
+    if (icon.isNull()) {
+        icon = QIcon(":/logo.png");
+        if (qApp) {
+            qApp->setWindowIcon(icon);
+        }
+    }
+
+    return icon;
+}
+
+static void applyPhanMemQHTTWindowIcon(QWidget *window)
+{
+    if (!window) return;
+
+    const QIcon icon = phanMemQHTTAppIcon();
+    if (!icon.isNull()) {
+        window->setWindowIcon(icon);
+    }
+}
 
 // =======================================================================
 // [FIX THEME ĐỒNG BỘ] Đọc trạng thái Dark Mode từ AppData trước,
@@ -276,6 +310,10 @@ WdSolve::WdSolve(QWidget *parent)
 {
     ui->setupUi(this);
 
+    // Đảm bảo cửa sổ kết quả là top-level window có icon riêng trên taskbar
+    this->setWindowFlag(Qt::Window, true);
+    applyPhanMemQHTTWindowIcon(this);
+
     // =======================================================================
     // [FIX GIAO DIỆN]
     // =======================================================================
@@ -283,7 +321,7 @@ WdSolve::WdSolve(QWidget *parent)
 
     this->setWindowTitle("Kết quả tính toán");
     this->setWindowState(Qt::WindowMaximized);
-    this->setWindowIcon(QIcon(":/logo.png"));
+    applyPhanMemQHTTWindowIcon(this);
 
     this->wd_show    = nullptr;
     this->wd_ChatBot = nullptr;
@@ -858,7 +896,7 @@ WdSolve::WdSolve(QWidget *parent)
         tex += "\\IfFontExistsTF{Times New Roman}{\\setmainfont{Times New Roman}}{\n";
         tex += "\\IfFontExistsTF{Arial}{\\setmainfont{Arial}}{\\setmainfont{Latin Modern Roman}}}\n";
 #else \
-    // Linux/macOS vẫn ưu tiên Noto Serif đóng gói kèm app để PDF tiếng Việt ổn định.
+        // Linux/macOS vẫn ưu tiên Noto Serif đóng gói kèm app để PDF tiếng Việt ổn định.
         if (!bundledFontDir.isEmpty()) {
             tex += "\\setmainfont{NotoSerif}[\n";
             tex += "  Path={" + bundledFontDir + "},\n";
@@ -873,9 +911,9 @@ WdSolve::WdSolve(QWidget *parent)
             tex += "\\IfFontExistsTF{Times New Roman}{\\setmainfont{Times New Roman}}{\\setmainfont{Latin Modern Roman}}}}\n";
         }
 #endif \
-    // [FIX REPORT PDF - TRÌNH BÀY CHUYÊN NGHIỆP] \ \
-    // Cấu hình trang theo kiểu báo cáo khoa học: lề rõ, header/footer, \ \
-    // tiêu đề mục có đường kẻ, tiêu đề từng từ vựng có khung nhẹ.
+        // [FIX REPORT PDF - TRÌNH BÀY CHUYÊN NGHIỆP] \ \
+        // Cấu hình trang theo kiểu báo cáo khoa học: lề rõ, header/footer, \ \
+        // tiêu đề mục có đường kẻ, tiêu đề từng từ vựng có khung nhẹ.
         tex += "\\geometry{left=22mm,right=22mm,top=20mm,bottom=22mm,headheight=15pt,headsep=7mm,footskip=10mm}\n";
         tex += "\\definecolor{ReportBlue}{HTML}{1F4E79}\n";
         tex += "\\definecolor{ReportGray}{HTML}{F4F7FB}\n";
@@ -1341,6 +1379,7 @@ WdSolve::WdSolve(QWidget *parent)
 
 
         QDialog *previewDialog = new QDialog(this);
+        applyPhanMemQHTTWindowIcon(previewDialog);
         previewDialog->setWindowTitle("Xem lời giải với PDF");
         // [FIX PREVIEW WINDOW]
         // Không dùng chiều cao 880 cố định vì trên nhiều máy sau khi tải app,
@@ -2469,8 +2508,10 @@ void WdSolve::on_pushButton_2_clicked()
     if (this->currentOriginalLp.c.size() == 2) {
         if (!this->wd_show) {
             this->wd_show = new WdShowImage(this);
+            applyPhanMemQHTTWindowIcon(this->wd_show);
         }
 
+        applyPhanMemQHTTWindowIcon(this->wd_show);
         this->wd_show->drawGraph(currentLp, currentOriginalLp,
                                  currentSolution, this->currentHistory);
         this->wd_show->show();
@@ -2858,8 +2899,12 @@ void WdSolve::on_pushButton_3_clicked()
     contextString += "Nếu người dùng hỏi về nghiệm tối ưu hoặc giá trị tối ưu, hãy đối chiếu cả mục 4, bảng nghiệm đang hiển thị, và các bước thực thi trước khi trả lời.\n";
     contextString += "QUAN TRỌNG: Nếu người dùng hỏi bất kỳ câu hỏi ngoài lề (không thuộc phạm vi của bài toán hoặc quy hoạch tuyến tính), bạn KHÔNG ĐƯỢC trả lời nội dung đó. Bạn BẮT BUỘC phải trả lời chính xác bằng câu sau và không giải thích gì thêm:\n\"Xin lỗi câu hỏi của bạn không thuộc phạm vi của bài toán\"";
 
-    if (!this->wd_ChatBot) this->wd_ChatBot = new WdChatBot(this);
+    if (!this->wd_ChatBot) {
+        this->wd_ChatBot = new WdChatBot(this);
+        applyPhanMemQHTTWindowIcon(this->wd_ChatBot);
+    }
 
+    applyPhanMemQHTTWindowIcon(this->wd_ChatBot);
     this->wd_ChatBot->setProblemContext(contextString);
     this->wd_ChatBot->show();
     this->wd_ChatBot->raise();

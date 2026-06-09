@@ -36,6 +36,39 @@
 #include <QKeyEvent>
 #include <QEvent>
 #include <QTimer>
+#include <QIcon>
+
+// =======================================================================
+// [FIX ICON ĐỒNG BỘ TOÀN BỘ CỬA SỔ]
+// Mỗi cửa sổ top-level phải có icon riêng. Nếu chỉ set icon ở MainWindow,
+// khi chuyển sang Dashboard / WdSolve / ChatBot / cửa sổ xem hình, Windows
+// có thể lấy icon mặc định hoặc làm mất icon trên taskbar.
+// Hàm dưới đây lấy icon chung từ QApplication; nếu chưa có thì fallback về
+// icon đã nhúng trong resource.qrc theo alias ":/logo.png".
+// =======================================================================
+static QIcon phanMemQHTTAppIcon()
+{
+    QIcon icon = qApp ? qApp->windowIcon() : QIcon();
+
+    if (icon.isNull()) {
+        icon = QIcon(":/logo.png");
+        if (qApp) {
+            qApp->setWindowIcon(icon);
+        }
+    }
+
+    return icon;
+}
+
+static void applyPhanMemQHTTWindowIcon(QWidget *window)
+{
+    if (!window) return;
+
+    const QIcon icon = phanMemQHTTAppIcon();
+    if (!icon.isNull()) {
+        window->setWindowIcon(icon);
+    }
+}
 
 // =======================================================================
 // Cấu trúc bọc bài toán kèm theo thời gian giải
@@ -464,6 +497,10 @@ Dashboard::Dashboard(QWidget *parent)
 {
     ui->setupUi(this);
 
+    // Đảm bảo Dashboard là một cửa sổ top-level có icon riêng trên taskbar
+    this->setWindowFlag(Qt::Window, true);
+    applyPhanMemQHTTWindowIcon(this);
+
     // Tự động tải lịch sử lên khi khởi động
     loadHistoryFromJson();
 
@@ -474,7 +511,7 @@ Dashboard::Dashboard(QWidget *parent)
     ui->label_5->hide();
     ui->max_min->hide();
     ui->table_varConstraint->hide();
-    this->setWindowIcon(QIcon(":/logo.png"));
+    applyPhanMemQHTTWindowIcon(this);
 
     this->wd_solve = nullptr;
     this->setWindowTitle("Nhập liệu");
@@ -1292,8 +1329,10 @@ void Dashboard::on_pushButton_3_clicked()
     LinearProgram originalLp = local_lp;
     if (!this->wd_solve) {
         this->wd_solve = new WdSolve(this);
+        applyPhanMemQHTTWindowIcon(this->wd_solve);
     }
 
+    applyPhanMemQHTTWindowIcon(this->wd_solve);
     this->wd_solve->displayResults(
         solver.getLp(),
         originalLp,
@@ -1407,6 +1446,7 @@ void Dashboard::on_pushButton_5_clicked()
 void Dashboard::on_btn_HuongDan_clicked()
 {
     QDialog dialog(this);
+    applyPhanMemQHTTWindowIcon(&dialog);
     dialog.setWindowTitle("Hướng dẫn sử dụng");
     dialog.resize(800, 620);
 
