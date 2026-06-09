@@ -62,7 +62,7 @@ private:
     int findPivotColumn(bool isPhaseOne);
     int findPivotRow(int pivotCol);
     void performPivot(int pivotRow, int pivotCol);
-    // Thuat toan hai phan cho cac bai phuc tap
+    // Thuat toan hai pha cho cac bai phuc tap
     bool solveTwoPhase();
     bool checkAlternativeOptima();
     void findAndRecordAlternativeOptimum();
@@ -70,7 +70,7 @@ private:
     // Các biến hỗ trợ nghiệm vô số
     bool alternativeOptimaFound = false;
     std::vector<double> altSolution;
-    std::vector<double> firstSolution; // BẮT BUỘC THÊM ĐỂ KHỚP VỚI .CPP
+    std::vector<double> firstSolution;
 };
 
 #endif // SIMPLEXSOLVER_H
