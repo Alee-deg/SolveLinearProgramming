@@ -260,7 +260,7 @@ jobs:
           '; Cấu hình output',
           'OutFile "PhanMemQHTT-Windows.exe"',
           'Name "Phần Mềm Giải Quy Hoạch Tuyến Tính"',
-          'Icon "logo.ico"',
+          'Icon "resources\\images\\logo.ico"',
           'InstallDir "$TEMP\PhanMemQHTT"',
           'RequestExecutionLevel user',
           'SilentInstall silent',
@@ -275,6 +275,11 @@ jobs:
           '  RMDir /r "$INSTDIR"',
           'SectionEnd'
         ) | Set-Content -Path "installer.nsi" -Encoding UTF8
+
+        if (-not (Test-Path "resources\images\logo.ico")) {
+          Write-Host "[ERROR] Không tìm thấy Windows installer icon: resources\images\logo.ico"
+          exit 1
+        }
 
         $nsisPath = "C:\Program Files (x86)\NSIS\makensis.exe"
         & $nsisPath "installer.nsi"
@@ -478,24 +483,32 @@ jobs:
         fi
 
         echo "[Desktop Entry]" > AppDir/usr/share/applications/SolveLinearProgramming.desktop
+        echo "Type=Application" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
         echo "Name=Giải Quy Hoạch Tuyến Tính" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
+        echo "Comment=Linear Programming Solver" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
         echo "Exec=SolveLinearProgramming" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
         echo "Icon=SolveLinearProgramming" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
-        echo "Type=Application" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
-        echo "Categories=Education;Science;" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
+        echo "Terminal=false" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
+        echo "Categories=Education;Science;Math;" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
+        echo "StartupWMClass=SolveLinearProgramming" >> AppDir/usr/share/applications/SolveLinearProgramming.desktop
 
-        if [ -f "resources/icon.png" ]; then
-          cp resources/icon.png \
-             AppDir/usr/share/icons/hicolor/256x256/apps/SolveLinearProgramming.png
-        else
-          convert -size 256x256 xc:#0078D7 \
-            -font DejaVu-Sans-Bold -pointsize 60 \
-            -fill white -gravity center \
-            -annotate 0 "QHTT" \
-            AppDir/usr/share/icons/hicolor/256x256/apps/SolveLinearProgramming.png 2>/dev/null || \
-          cp /usr/share/pixmaps/gnome-terminal.png \
-             AppDir/usr/share/icons/hicolor/256x256/apps/SolveLinearProgramming.png 2>/dev/null || true
+        # [ICON FIX - LINUX APPIMAGE]
+        # Sau khi restructure, icon chính nằm tại resources/images/logo.png.
+        # AppImage cần cả icon trong chuẩn hicolor và icon ở root AppDir.
+        if [ ! -f "resources/images/logo.png" ]; then
+          echo "[ERROR] Không tìm thấy Linux/AppImage icon: resources/images/logo.png"
+          exit 1
         fi
+
+        cp resources/images/logo.png \
+           AppDir/usr/share/icons/hicolor/256x256/apps/SolveLinearProgramming.png
+        cp resources/images/logo.png AppDir/SolveLinearProgramming.png
+
+        # Một số AppImage launcher/linuxdeploy cần .desktop ở root AppDir.
+        cp AppDir/usr/share/applications/SolveLinearProgramming.desktop \
+           AppDir/SolveLinearProgramming.desktop
+
+        echo "[OK] Linux/AppImage icon added: SolveLinearProgramming.png"
 
         echo "[Paths]" > AppDir/usr/bin/qt.conf
         echo "Prefix = .." >> AppDir/usr/bin/qt.conf
@@ -532,6 +545,8 @@ jobs:
         export LINUXDEPLOY_OUTPUT_VERSION=""
         ./linuxdeploy-x86_64.AppImage \
           --appdir AppDir \
+          --desktop-file AppDir/SolveLinearProgramming.desktop \
+          --icon-file AppDir/SolveLinearProgramming.png \
           --plugin qt \
           --output appimage
 
@@ -576,6 +591,35 @@ jobs:
         host: 'mac'
         arch: 'clang_64'
 
+    - name: 2.1. Tạo icon macOS .icns
+      run: |
+        if [ ! -f "resources/images/logo.png" ]; then
+          echo "[ERROR] Không tìm thấy macOS source icon: resources/images/logo.png"
+          exit 1
+        fi
+
+        mkdir -p resources/images/logo.iconset
+        sips -z 16 16     resources/images/logo.png --out resources/images/logo.iconset/icon_16x16.png
+        sips -z 32 32     resources/images/logo.png --out resources/images/logo.iconset/icon_16x16@2x.png
+        sips -z 32 32     resources/images/logo.png --out resources/images/logo.iconset/icon_32x32.png
+        sips -z 64 64     resources/images/logo.png --out resources/images/logo.iconset/icon_32x32@2x.png
+        sips -z 128 128   resources/images/logo.png --out resources/images/logo.iconset/icon_128x128.png
+        sips -z 256 256   resources/images/logo.png --out resources/images/logo.iconset/icon_128x128@2x.png
+        sips -z 256 256   resources/images/logo.png --out resources/images/logo.iconset/icon_256x256.png
+        sips -z 512 512   resources/images/logo.png --out resources/images/logo.iconset/icon_256x256@2x.png
+        sips -z 512 512   resources/images/logo.png --out resources/images/logo.iconset/icon_512x512.png
+        sips -z 1024 1024 resources/images/logo.png --out resources/images/logo.iconset/icon_512x512@2x.png
+
+        iconutil -c icns resources/images/logo.iconset -o resources/images/logo.icns
+        rm -rf resources/images/logo.iconset
+
+        if [ ! -f "resources/images/logo.icns" ]; then
+          echo "[ERROR] Tạo logo.icns thất bại"
+          exit 1
+        fi
+
+        echo "[OK] Created macOS icon: resources/images/logo.icns"
+
     - name: 3. Build bằng CMake + Clang
       run: |
         cmake -B build \
@@ -611,6 +655,24 @@ jobs:
           cp settings.ini "$APP_BUNDLE/Contents/MacOS/"
           echo "[OK] Copied settings.ini"
         fi
+
+        # [ICON FIX - MACOS]
+        # macOS bundle cần icon .icns trong Contents/Resources và Info.plist phải trỏ tới icon đó.
+        if [ ! -f "resources/images/logo.icns" ]; then
+          echo "[ERROR] Không tìm thấy macOS icon: resources/images/logo.icns"
+          exit 1
+        fi
+
+        mkdir -p "$APP_BUNDLE/Contents/Resources"
+        cp resources/images/logo.icns "$APP_BUNDLE/Contents/Resources/logo.icns"
+
+        INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"
+        /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile logo.icns" "$INFO_PLIST" 2>/dev/null || \
+        /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string logo.icns" "$INFO_PLIST"
+
+        # Touch bundle để Finder cập nhật icon khi mở DMG.
+        touch "$APP_BUNDLE"
+        echo "[OK] macOS bundle icon added: logo.icns"
 
         mkdir -p "$APP_BUNDLE/Contents/Frameworks"
         if [ -d "$Qt6_DIR/lib/QtPrintSupport.framework" ]; then
