@@ -866,31 +866,41 @@ bool SimplexSolver::checkAlternativeOptima() {
     int m = tableau.size() - 1;
     int n = tableau[0].size() - 1;
 
-    // Bỏ qua các cột thuộc về các biến nội bộ (được sinh ra do tách biến tự do)
-    std::set<int> ignoredCols;
-    int internalIdx = 0;
-    for (size_t i = 0; i < originalVarBounds.size(); ++i) {
-        if (originalVarBounds[i].isFree || originalVarBounds[i].sign == "free") {
-            // Không dùng riêng từng nửa x_i^+, x_i^- để kết luận vô số nghiệm,
-            // vì biến tự do được biểu diễn bởi hiệu của hai biến không âm.
-            ignoredCols.insert(internalIdx);
-            ignoredCols.insert(internalIdx + 1);
-            internalIdx += 2;
-        } else {
-            internalIdx += 1;
+    // ===================================================================
+    // [FIX VÔ SỐ NGHIỆM VỚI BIẾN TỰ DO]
+    //
+    // Không được bỏ qua các cột sinh ra từ biến tự do
+    // x_j = x_j^+ - x_j^-.
+    //
+    // Với bài toán:
+    //     Max Z = 2x1 - 4x2
+    //     x1 - 2x2 <= 5
+    //    -x1 + 2x2 <= 5
+    //     x1, x2 tự do
+    //
+    // tập nghiệm tối ưu là cả đường thẳng x1 - 2x2 = 5.
+    // Hướng tối ưu xuất hiện ở chính các cột x_j^+, x_j^- có reduced cost = 0.
+    // Nếu bỏ qua các cột này, solver sẽ kết luận sai là "nghiệm tối ưu duy nhất".
+    //
+    // Vì vậy ta quét TẤT CẢ biến phi cơ sở có reduced cost = 0.
+    // Cột biến giả x0 ở Pha 2 nếu bị khóa bằng Big-M sẽ được bỏ qua.
+    // ===================================================================
+    for (int j = 0; j < n; ++j) {
+        if (std::abs(tableau[m][j]) >= 1e8) continue; // bỏ qua biến giả x0 bị khóa Big-M
+
+        bool isBasic = false;
+        for (int i = 0; i < m; ++i) {
+            if (basicVariables[i] == j) {
+                isBasic = true;
+                break;
+            }
+        }
+
+        if (!isBasic && std::abs(tableau[m][j]) <= CLEAN_EPS) {
+            return true;
         }
     }
 
-    // Nếu tồn tại một biến phi cơ sở (non-basic) có hệ số mục tiêu = 0 -> Có thể đổi cơ sở mà không làm giảm Z
-    for (int j = 0; j < n; ++j) {
-        if (ignoredCols.count(j)) continue;
-        bool isBasic = false;
-        for (int i = 0; i < m; ++i)
-            if (basicVariables[i] == j) { isBasic = true; break; }
-        if (!isBasic && std::abs(tableau[m][j]) <= CLEAN_EPS
-            && std::abs(tableau[m][j]) < 1e8)
-            return true;
-    }
     return false;
 }
 
@@ -911,20 +921,6 @@ void SimplexSolver::findAndRecordAlternativeOptimum() {
     int m = tableau.size() - 1;
     int n = tableau[0].size() - 1;
 
-    std::set<int> ignoredCols;
-    int internalIdx = 0;
-    for (size_t i = 0; i < originalVarBounds.size(); ++i) {
-        if (originalVarBounds[i].isFree || originalVarBounds[i].sign == "free") {
-            // Không dùng riêng từng nửa x_i^+, x_i^- để kết luận vô số nghiệm,
-            // vì biến tự do được biểu diễn bởi hiệu của hai biến không âm.
-            ignoredCols.insert(internalIdx);
-            ignoredCols.insert(internalIdx + 1);
-            internalIdx += 2;
-        } else {
-            internalIdx += 1;
-        }
-    }
-
     // Sao lưu lại toàn bộ trạng thái để có thể rollback khi tìm thấy nghiệm ảo (chống suy biến)
     auto backupTableau = this->tableau;
     auto backupBasicVars = this->basicVariables;
@@ -932,55 +928,68 @@ void SimplexSolver::findAndRecordAlternativeOptimum() {
 
     bool foundDifferent = false;
 
-    // Vòng lặp quét tất cả các cột có khả năng sinh ra vô số nghiệm
+    // ===================================================================
+    // [FIX VÔ SỐ NGHIỆM VỚI BIẾN TỰ DO]
+    //
+    // Không bỏ qua x_j^+, x_j^- nữa. Với biến tự do, hướng tối ưu có thể
+    // nằm ở chính các cột này. Sau khi pivot thử, getSolution() sẽ ánh xạ
+    // nghiệm nội bộ về nghiệm gốc để kiểm tra nghiệm có thật sự khác không.
+    // ===================================================================
     for (int j = 0; j < n; ++j) {
-        if (ignoredCols.count(j)) continue;
+        if (std::abs(tableau[m][j]) >= 1e8) continue; // bỏ qua biến giả x0 bị khóa Big-M
 
         bool isBasic = false;
         for (int i = 0; i < m; ++i) {
-            if (basicVariables[i] == j) { isBasic = true; break; }
+            if (basicVariables[i] == j) {
+                isBasic = true;
+                break;
+            }
         }
 
-        // Nếu phát hiện biến phi cơ sở có hệ số z = 0
+        // Nếu phát hiện biến phi cơ sở có reduced cost = 0
         if (!isBasic && std::abs(tableau[m][j]) <= CLEAN_EPS) {
-            int altPivotRow = findPivotRow(j); // Tìm hàng để đưa biến này vào
-            if (altPivotRow != -1) {
-                if (!history.empty()) {
-                    history.back().pivotRow  = altPivotRow;
-                    history.back().pivotCol  = j;
-                }
+            int altPivotRow = findPivotRow(j);
 
-                // Thực hiện Pivot (Xoay) để sinh ra nghiệm mới
-                performPivot(altPivotRow, j);
-                std::vector<double> tempSol = this->getSolution();
+            // Nếu cột này không có hàng xoay hợp lệ, không pivot vào cột đó.
+            // Tiếp tục thử các cột reduced cost = 0 khác.
+            if (altPivotRow == -1) {
+                continue;
+            }
 
-                // Kiểm tra xem nghiệm mới có THỰC SỰ KHÁC nghiệm cũ không
-                bool isDifferent = false;
-                for (size_t k = 0; k < firstSolution.size(); ++k) {
-                    if (std::abs(firstSolution[k] - tempSol[k]) > CLEAN_EPS) {
-                        isDifferent = true;
-                        break;
-                    }
-                }
+            if (!history.empty()) {
+                history.back().pivotRow  = altPivotRow;
+                history.back().pivotCol  = j;
+            }
 
-                if (isDifferent) {
-                    // Nếu thực sự khác, lưu nghiệm thứ 2 và dừng tìm kiếm
-                    this->altSolution = tempSol;
-                    if (!history.empty()) {
-                        history.back().stepName = "Điểm tối ưu thứ 2";
-                    }
-                    foundDifferent = true;
+            // Thực hiện Pivot (Xoay) để sinh ra nghiệm mới
+            performPivot(altPivotRow, j);
+            std::vector<double> tempSol = this->getSolution();
 
-                    // Khôi phục lại trạng thái bảng để không ảnh hưởng luồng chính
-                    this->tableau = backupTableau;
-                    this->basicVariables = backupBasicVars;
+            // Kiểm tra xem nghiệm mới có THỰC SỰ KHÁC nghiệm cũ không
+            bool isDifferent = false;
+            for (size_t k = 0; k < firstSolution.size(); ++k) {
+                if (std::abs(firstSolution[k] - tempSol[k]) > CLEAN_EPS) {
+                    isDifferent = true;
                     break;
-                } else {
-                    // Nếu xoay xong mà nghiệm vẫn giữ nguyên (nghiệm ảo), rollback lại và đi thử cột tiếp theo
-                    this->tableau = backupTableau;
-                    this->basicVariables = backupBasicVars;
-                    this->history = backupHistory;
                 }
+            }
+
+            if (isDifferent) {
+                this->altSolution = tempSol;
+                if (!history.empty()) {
+                    history.back().stepName = "Điểm tối ưu thứ 2";
+                }
+                foundDifferent = true;
+
+                // Khôi phục lại trạng thái bảng để không ảnh hưởng luồng chính
+                this->tableau = backupTableau;
+                this->basicVariables = backupBasicVars;
+                break;
+            } else {
+                // Nếu xoay xong mà nghiệm vẫn giữ nguyên, rollback lại và thử cột tiếp theo
+                this->tableau = backupTableau;
+                this->basicVariables = backupBasicVars;
+                this->history = backupHistory;
             }
         }
     }
