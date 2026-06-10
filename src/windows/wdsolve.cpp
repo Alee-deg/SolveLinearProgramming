@@ -68,6 +68,170 @@ static void applyPdfPreviewTitleBarButtons(QDialog *dialog)
 
 
 
+
+// =======================================================================
+// [FIX TẬP NGHIỆM VÔ SỐ]
+// Kiểm tra hai điểm tối ưu tìm được có tạo thành cả một đường thẳng tối ưu
+// hay chỉ nên ghi an toàn là đoạn/tập lồi giữa hai điểm.
+//
+// Nếu d = P2 - P1 thỏa:
+// - A_i.d = 0 với mọi ràng buộc gốc,
+// - c.d = 0 với hàm mục tiêu,
+// - biến không tự do không bị thay đổi theo d,
+// thì toàn bộ đường P1 + t d, t ∈ R vẫn khả thi và cùng giá trị tối ưu.
+// Trường hợp này phải ghi t ∈ R, không ghi 0 <= λ <= 1.
+// =======================================================================
+static std::vector<double> buildOptimalDirectionVector(const std::vector<double>& first,
+                                                       const std::vector<double>& second,
+                                                       int dim)
+{
+    std::vector<double> direction(dim, 0.0);
+    for (int i = 0; i < dim; ++i) {
+        double a = (i < (int)first.size()) ? first[i] : 0.0;
+        double b = (i < (int)second.size()) ? second[i] : 0.0;
+        direction[i] = b - a;
+        if (std::abs(direction[i]) < 1e-9) direction[i] = 0.0;
+    }
+    return direction;
+}
+
+
+static double evaluateOriginalObjectiveValue(const LinearProgram& originalLp,
+                                             const std::vector<double>& point)
+{
+    double value = originalLp.c_0;
+
+    int dim = std::min((int)originalLp.c.size(), (int)point.size());
+    for (int j = 0; j < dim; ++j) {
+        value += originalLp.c[j] * point[j];
+    }
+
+    if (std::abs(value) < 1e-9) {
+        value = 0.0;
+    }
+
+    return value;
+}
+
+
+static bool isObjectiveConstantOnOriginalVariables(const LinearProgram& originalLp)
+{
+    const double eps = 1e-9;
+    for (double coeff : originalLp.c) {
+        if (std::abs(coeff) > eps) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool isFullOptimalLineSet(const LinearProgram& originalLp,
+                                 const std::vector<double>& first,
+                                 const std::vector<double>& second)
+{
+    const double eps = 1e-8;
+    int dim = (int)originalLp.varBounds.size();
+    if (dim <= 0) return false;
+
+    std::vector<double> direction = buildOptimalDirectionVector(first, second, dim);
+
+    bool hasDirection = false;
+    for (double v : direction) {
+        if (std::abs(v) > eps) {
+            hasDirection = true;
+            break;
+        }
+    }
+    if (!hasDirection) return false;
+
+    double objectiveDot = 0.0;
+    for (int j = 0; j < dim && j < (int)originalLp.c.size(); ++j) {
+        objectiveDot += originalLp.c[j] * direction[j];
+    }
+    if (std::abs(objectiveDot) > eps) return false;
+
+    for (int i = 0; i < (int)originalLp.A.size(); ++i) {
+        double rowDot = 0.0;
+        for (int j = 0; j < dim && j < (int)originalLp.A[i].size(); ++j) {
+            rowDot += originalLp.A[i][j] * direction[j];
+        }
+        if (std::abs(rowDot) > eps) return false;
+    }
+
+    for (int j = 0; j < dim && j < (int)originalLp.varBounds.size(); ++j) {
+        const VarBound& vb = originalLp.varBounds[j];
+        bool isFree = vb.isFree || vb.sign == "free";
+        if (!isFree && std::abs(direction[j]) > eps) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool isForwardOptimalRaySet(const LinearProgram& originalLp,
+                                   const std::vector<double>& first,
+                                   const std::vector<double>& second)
+{
+    const double eps = 1e-8;
+    int dim = (int)originalLp.varBounds.size();
+    if (dim <= 0) return false;
+
+    std::vector<double> direction = buildOptimalDirectionVector(first, second, dim);
+
+    bool hasDirection = false;
+    for (double v : direction) {
+        if (std::abs(v) > eps) {
+            hasDirection = true;
+            break;
+        }
+    }
+    if (!hasDirection) return false;
+
+    // Hàm mục tiêu phải không đổi theo hướng đi.
+    double objectiveDot = 0.0;
+    for (int j = 0; j < dim && j < (int)originalLp.c.size(); ++j) {
+        objectiveDot += originalLp.c[j] * direction[j];
+    }
+    if (std::abs(objectiveDot) > eps) return false;
+
+    // Kiểm tra hướng first + t*direction, t >= 0 có luôn thỏa ràng buộc không.
+    for (int i = 0; i < (int)originalLp.A.size(); ++i) {
+        double rowDot = 0.0;
+        for (int j = 0; j < dim && j < (int)originalLp.A[i].size(); ++j) {
+            rowDot += originalLp.A[i][j] * direction[j];
+        }
+
+        QString sign = (i < (int)originalLp.signs.size()) ? originalLp.signs[i].trimmed() : "";
+
+        if (sign == "=" || sign == "==") {
+            if (std::abs(rowDot) > eps) return false;
+        } else if (sign == "<=") {
+            if (rowDot > eps) return false;
+        } else if (sign == ">=") {
+            if (rowDot < -eps) return false;
+        }
+    }
+
+    // Kiểm tra ràng buộc dấu của biến theo hướng t >= 0.
+    for (int j = 0; j < dim && j < (int)originalLp.varBounds.size(); ++j) {
+        const VarBound& vb = originalLp.varBounds[j];
+        bool isFree = vb.isFree || vb.sign == "free";
+        if (isFree) continue;
+
+        QString sign = vb.sign.trimmed();
+        if (sign == ">=") {
+            if (direction[j] < -eps) return false;
+        } else if (sign == "<=") {
+            if (direction[j] > eps) return false;
+        }
+    }
+
+    return true;
+}
+
+
+
 static bool readDarkModeSetting()
 {
     QString appDataSettingsPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/settings.ini";
@@ -470,6 +634,11 @@ WdSolve::WdSolve(QWidget *parent)
             }
         }
 
+        // [FIX OBJECTIVE CONSTANT c_0]
+        // Báo cáo/PDF cũng phải lấy Z từ hàm mục tiêu gốc,
+        // không lấy trực tiếp hằng số dòng Z trong tableau.
+        z_opt = evaluateOriginalObjectiveValue(currentOriginalLp, opt_x);
+
         QString optSolHtml = "(", optSolTex = "(", varListHtml = "(", varListTex = "(";
         for (size_t i = 0; i < opt_x.size(); ++i) {
             optSolHtml += formatVal(opt_x[i]);
@@ -516,6 +685,34 @@ WdSolve::WdSolve(QWidget *parent)
         QString secondPointHtml = makePointHtml(this->currentAltSolution);
         QString firstPointTex = makePointTex(this->currentSolution);
         QString secondPointTex = makePointTex(this->currentAltSolution);
+
+        auto makeDirectionHtml = [&](const std::vector<double>& first,
+                                     const std::vector<double>& second) -> QString {
+            int dim = (int)currentOriginalLp.varBounds.size();
+            std::vector<double> direction = buildOptimalDirectionVector(first, second, dim);
+            return makePointHtml(direction);
+        };
+
+        auto makeDirectionTex = [&](const std::vector<double>& first,
+                                    const std::vector<double>& second) -> QString {
+            int dim = (int)currentOriginalLp.varBounds.size();
+            std::vector<double> direction = buildOptimalDirectionVector(first, second, dim);
+            return makePointTex(direction);
+        };
+
+        bool isWholeOptimalLineForReport =
+            ((int)currentOriginalLp.varBounds.size() == 2) &&
+            isFullOptimalLineSet(currentOriginalLp, this->currentSolution, this->currentAltSolution);
+
+        bool isForwardOptimalRayForReport =
+            !isWholeOptimalLineForReport &&
+            isForwardOptimalRaySet(currentOriginalLp, this->currentSolution, this->currentAltSolution);
+
+        bool isWholeFeasibleRegionOptimalForReport =
+            isObjectiveConstantOnOriginalVariables(currentOriginalLp);
+
+        QString directionHtml = makeDirectionHtml(this->currentSolution, this->currentAltSolution);
+        QString directionTex  = makeDirectionTex(this->currentSolution, this->currentAltSolution);
 
         // ==========================================
         // 1. TẠO CHUỖI HTML ĐỂ RENDER PDF BÁO CÁO
@@ -620,9 +817,9 @@ WdSolve::WdSolve(QWidget *parent)
 
             QString pdfOptZHtml;
             if (currentOriginalLp.isMaximize) {
-                pdfOptZHtml = "Đối với hàm mục tiêu, vì bài toán gốc là <b>Max Z</b> nên thuật toán đã giải thông qua việc tìm <b>Min(-Z)</b>. Do đó, giá trị lớn nhất của Z sẽ bằng đảo dấu của hằng số tự do trong phương trình -Z hiện tại.";
+                pdfOptZHtml = "Vì bài toán gốc là <b>Max Z</b>, thuật toán có thể hiển thị dòng mục tiêu dưới dạng <b>-Z</b> hoặc giải thông qua <b>Min(-Z)</b>. Tuy nhiên, giá trị tối ưu cuối cùng phải được tính lại theo hàm mục tiêu gốc <b>Z = c0 + Σcjxj</b>. Sau khi đọc được nghiệm tối ưu, thay nghiệm đó vào hàm mục tiêu ban đầu để thu được giá trị lớn nhất của Z.";
             } else {
-                pdfOptZHtml = "Đối với hàm mục tiêu, giá trị nhỏ nhất của <b>Min Z</b> chính là hằng số tự do trong phương trình Z hiện tại.";
+                pdfOptZHtml = "Giá trị tối ưu cuối cùng phải được tính lại theo hàm mục tiêu gốc <b>Z = c0 + Σcjxj</b>. Sau khi đọc được nghiệm tối ưu, thay nghiệm đó vào hàm mục tiêu ban đầu để thu được giá trị nhỏ nhất của Z.";
             }
 
             QString pdfUnboundedHtml;
@@ -648,7 +845,8 @@ WdSolve::WdSolve(QWidget *parent)
                                                  "vào cơ sở để thay thế <b><font color='red'>" + leaveVar + "</font></b> nhằm làm vế phải dương."
                                                  "</p>";
                 } else {
-                    pdfIntroHtml += "<p style='text-align: left; margin: 4px 0 10px 0; font-style: italic; font-size: 12pt;'>"
+                    pdfIntroHtml += "<p style='text-align: left; margin: 4px 0 4px 0; color: #0056b3; font-weight: bold; font-size: 12pt;'>Bước tiếp theo:</p>";
+                    pdfIntroHtml += "<p style='text-align: left; margin: 0 0 10px 0; font-style: italic; font-size: 12pt;'>"
                                     "&rarr; Chọn <b><font color='green'>" + enterVar + "</font></b> làm biến vào, đẩy "
                                                  "<b><font color='red'>" + leaveVar + "</font></b> ra khỏi cơ sở."
                                                  "</p>";
@@ -658,7 +856,7 @@ WdSolve::WdSolve(QWidget *parent)
                                         "&rarr; <b>Kết luận:</b> Đã đạt từ vựng tối ưu và bài toán có vô số nghiệm."
                                         "</p>";
                         pdfIntroHtml += "<p style='text-align: left; margin: 0 0 12px 0; color: #0056b3; font-style: italic; font-size: 11pt;'>"
-                                        "<b>* Giải thích vô số nghiệm:</b> vì tồn tại hệ số của biến không cơ sở ở hàm mục tiêu bằng 0 nên bài toán có vô số nghiệm tối ưu.<br>"
+                                        "<b>* Giải thích vô số nghiệm:</b> Ở từ vựng tối ưu, tồn tại biến không cơ sở có hệ số mục tiêu bằng 0 và khi thay đổi biến này theo hướng khả thi thì nghiệm gốc thay đổi nhưng giá trị hàm mục tiêu vẫn giữ nguyên. Vì vậy bài toán có nhiều nghiệm khả thi khác nhau cùng đạt giá trị tối ưu.<br>"
                                         "<b>* Giải thích cách đọc nghiệm:</b> cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.<br>"
                                         "<b>* Giải thích giá trị tối ưu:</b> " + pdfOptZHtml + "<br>"
                                                         "<b>* Lưu ý:</b> Bước xoay tiếp theo chỉ để tìm tọa độ tối ưu thứ 2."
@@ -836,14 +1034,35 @@ WdSolve::WdSolve(QWidget *parent)
 
             if (zText.contains("Vô số nghiệm", Qt::CaseInsensitive) &&
                 !firstPointHtml.isEmpty() && !secondPointHtml.isEmpty()) {
-                html += "<p style='text-align: left; margin-bottom: 5px;'><b>Nghiệm tối ưu thứ nhất:</b> " + varListHtml + " = " + firstPointHtml + "</p>";
-                html += "<p style='text-align: left; margin-bottom: 5px;'><b>Nghiệm tối ưu thứ hai:</b> " + varListHtml + " = " + secondPointHtml + "</p>";
-                html += "<p style='text-align: left; margin-bottom: 5px;'><b>Tập nghiệm tối ưu:</b> "
-                        "{ X(&lambda;) = &lambda;" + firstPointHtml +
-                        " + (1 - &lambda;)" + secondPointHtml +
-                        " | 0 &le; &lambda; &le; 1 }</p>";
-                html += "<p style='text-align: left; margin-bottom: 5px;'><i>Các điểm thuộc tập trên đều là nghiệm tối ưu.</i></p>";
-                html += "<p style='text-align: left; margin-bottom: 5px;'><i>Nếu bài toán có nhiều hơn hai biến, tập nghiệm tối ưu tổng quát có thể là một mặt lồi của miền nghiệm khả thi, không nhất thiết chỉ là đoạn thẳng nối hai điểm trên.</i></p>";
+                if (isWholeFeasibleRegionOptimalForReport) {
+                    html += "<p style='text-align: left; margin-bottom: 5px;'><b>Một nghiệm tối ưu minh họa:</b> " + varListHtml + " = " + firstPointHtml + "</p>";
+                    html += "<p style='text-align: left; margin-bottom: 5px;'><b>Một điểm khả thi minh họa khác:</b> " + varListHtml + " = " + secondPointHtml + "</p>";
+                    html += "<p style='text-align: left; margin-bottom: 5px;'><b>Tập nghiệm tối ưu:</b> Toàn bộ miền nghiệm khả thi của bài toán gốc.</p>";
+                    html += "<p style='text-align: left; margin-bottom: 5px;'><i>Vì tất cả hệ số của các biến trong hàm mục tiêu đều bằng 0, nên Z = c0 là hằng số trên mọi điểm khả thi. Do đó mọi điểm thỏa hệ ràng buộc đều là nghiệm tối ưu; không được kết luận tập nghiệm chỉ là đoạn nối giữa hai điểm minh họa.</i></p>";
+                } else {
+                    html += "<p style='text-align: left; margin-bottom: 5px;'><b>Nghiệm tối ưu thứ nhất:</b> " + varListHtml + " = " + firstPointHtml + "</p>";
+                    html += "<p style='text-align: left; margin-bottom: 5px;'><b>Nghiệm tối ưu thứ hai:</b> " + varListHtml + " = " + secondPointHtml + "</p>";
+                    if (isWholeOptimalLineForReport) {
+                        html += "<p style='text-align: left; margin-bottom: 5px;'><b>Tập nghiệm tối ưu:</b> "
+                                "{ X(t) = " + firstPointHtml +
+                                " + t" + directionHtml +
+                                " | t &isin; &real; }</p>";
+                        html += "<p style='text-align: left; margin-bottom: 5px;'><i>Tập nghiệm tối ưu là toàn bộ đường thẳng theo vector hướng trên, không chỉ là đoạn thẳng nối hai điểm.</i></p>";
+                    } else if (isForwardOptimalRayForReport) {
+                        html += "<p style='text-align: left; margin-bottom: 5px;'><b>Tập nghiệm tối ưu:</b> "
+                                "{ X(t) = " + firstPointHtml +
+                                " + t" + directionHtml +
+                                " | t &ge; 0 }</p>";
+                        html += "<p style='text-align: left; margin-bottom: 5px;'><i>Tập nghiệm tối ưu là một tia theo vector hướng trên; điểm thứ hai chỉ là điểm minh họa trên tia, không phải điểm cuối của đoạn.</i></p>";
+                    } else {
+                        html += "<p style='text-align: left; margin-bottom: 5px;'><b>Tập nghiệm tối ưu:</b> "
+                                "{ X(&lambda;) = &lambda;" + firstPointHtml +
+                                " + (1 - &lambda;)" + secondPointHtml +
+                                " | 0 &le; &lambda; &le; 1 }</p>";
+                        html += "<p style='text-align: left; margin-bottom: 5px;'><i>Các điểm thuộc tập trên đều là nghiệm tối ưu.</i></p>";
+                        html += "<p style='text-align: left; margin-bottom: 5px;'><i>Nếu bài toán có nhiều hơn hai biến, tập nghiệm tối ưu tổng quát có thể là một mặt lồi của miền nghiệm khả thi, không nhất thiết chỉ là đoạn thẳng nối hai điểm trên.</i></p>";
+                    }
+                }
             } else {
                 html += "<p style='text-align: left; margin-bottom: 5px;'><b>Nghiệm tối ưu:</b> " + varListHtml + " = " + optSolHtml + "</p>";
             }
@@ -888,7 +1107,7 @@ WdSolve::WdSolve(QWidget *parent)
         Q_UNUSED(bundledFontDir);
         tex += "\\IfFontExistsTF{Times New Roman}{\\setmainfont{Times New Roman}}{\n";
         tex += "\\IfFontExistsTF{Arial}{\\setmainfont{Arial}}{\\setmainfont{Latin Modern Roman}}}\n";
-#else \
+#else \ \
         // Linux/macOS vẫn ưu tiên Noto Serif đóng gói kèm app để PDF tiếng Việt ổn định.
         if (!bundledFontDir.isEmpty()) {
             tex += "\\setmainfont{NotoSerif}[\n";
@@ -1254,9 +1473,9 @@ WdSolve::WdSolve(QWidget *parent)
 
             QString texOptZ;
             if (currentOriginalLp.isMaximize) {
-                texOptZ = "Đối với hàm mục tiêu, vì bài toán gốc là \\textbf{Max Z} nên thuật toán đã giải thông qua việc tìm \\textbf{Min($-Z$)}. Do đó, giá trị lớn nhất của $Z$ sẽ bằng đảo dấu của hằng số tự do trong phương trình $-Z$ hiện tại.";
+                texOptZ = "Vì bài toán gốc là \\textbf{Max Z}, thuật toán có thể hiển thị dòng mục tiêu dưới dạng $-Z$ hoặc giải thông qua \\textbf{Min($-Z$)}. Tuy nhiên, giá trị tối ưu cuối cùng phải được tính lại theo hàm mục tiêu gốc $Z = c_0 + \\sum c_jx_j$. Sau khi đọc được nghiệm tối ưu, thay nghiệm đó vào hàm mục tiêu ban đầu để thu được giá trị lớn nhất của $Z$.";
             } else {
-                texOptZ = "Đối với hàm mục tiêu, giá trị nhỏ nhất của \\textbf{Min Z} chính là hằng số tự do trong phương trình $Z$ hiện tại.";
+                texOptZ = "Giá trị tối ưu cuối cùng phải được tính lại theo hàm mục tiêu gốc $Z = c_0 + \\sum c_jx_j$. Sau khi đọc được nghiệm tối ưu, thay nghiệm đó vào hàm mục tiêu ban đầu để thu được giá trị nhỏ nhất của $Z$.";
             }
 
             QString texUnbounded;
@@ -1280,11 +1499,12 @@ WdSolve::WdSolve(QWidget *parent)
                 if (stepIdx == 0 && isPhase1Loc) {
                     tex += "\\noindent\\textit{$\\rightarrow$ \\textbf{Phép xoay đặc biệt:} Đưa biến phụ $" + colorTexVar(enterVar, "ReportGreen") + "$ vào cơ sở để thay thế $" + colorTexVar(leaveVar, "ReportRed") + "$ nhằm làm vế phải dương.}\\\\[0.15cm]\n";
                 } else {
+                    tex += "\\noindent\\textbf{Bước tiếp theo:}\\\\[0.05cm]\n";
                     tex += "\\noindent\\textit{$\\rightarrow$ Chọn $" + colorTexVar(enterVar, "ReportGreen") + "$ làm biến vào, đẩy $" + colorTexVar(leaveVar, "ReportRed") + "$ ra khỏi cơ sở.}\\\\[0.15cm]\n";
 
                     if (zText.contains("Vô số nghiệm", Qt::CaseInsensitive) && stepIdx + 2 == currentHistory.size()) {
                         tex += "\\noindent\\textcolor{ReportRed}{$\\rightarrow$ \\textbf{Kết luận:} Đã đạt từ vựng tối ưu và bài toán có vô số nghiệm.}\\\\[0.1cm]\n";
-                        tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Giải thích vô số nghiệm:} vì tồn tại hệ số của biến không cơ sở ở hàm mục tiêu bằng 0 nên bài toán có vô số nghiệm tối ưu.}}\\\\\n";
+                        tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Giải thích vô số nghiệm:} Ở từ vựng tối ưu, tồn tại biến không cơ sở có hệ số mục tiêu bằng 0 và khi thay đổi biến này theo hướng khả thi thì nghiệm gốc thay đổi nhưng giá trị hàm mục tiêu vẫn giữ nguyên. Vì vậy bài toán có nhiều nghiệm khả thi khác nhau cùng đạt giá trị tối ưu.}}\\\\\n";
                         tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Giải thích cách đọc nghiệm:} cho tất cả các biến không cơ sở bằng 0, khi đó các biến cơ sở nhận giá trị bằng hằng số tự do của phương trình tương ứng.}}\\\\\n";
                         tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Giải thích giá trị tối ưu:} " + texOptZ + "}}\\\\\n";
                         tex += "\\noindent\\textcolor{ReportBlue}{\\textit{\\textbf{* Lưu ý:} Bước xoay tiếp theo chỉ để tìm tọa độ tối ưu thứ 2.}}\\\\[0.15cm]\n";
@@ -1354,14 +1574,35 @@ WdSolve::WdSolve(QWidget *parent)
 
             if (zText.contains("Vô số nghiệm", Qt::CaseInsensitive) &&
                 !firstPointTex.isEmpty() && !secondPointTex.isEmpty()) {
-                tex += "\\noindent\\textbf{Nghiệm tối ưu thứ nhất:} $" + varListTex + " = " + firstPointTex + "$\\\\[0.15cm]\n";
-                tex += "\\noindent\\textbf{Nghiệm tối ưu thứ hai:} $" + varListTex + " = " + secondPointTex + "$\\\\[0.15cm]\n";
-                tex += "\\noindent\\textbf{Tập nghiệm tối ưu:} "
-                       "$\\left\\{ X(\\lambda) = \\lambda " + firstPointTex +
-                       " + (1-\\lambda) " + secondPointTex +
-                       " \\mid 0 \\le \\lambda \\le 1 \\right\\}$\\\\[0.15cm]\n";
-                tex += "\\noindent\\textit{Các điểm thuộc tập trên đều là nghiệm tối ưu.}\\\\[0.15cm]\n";
-                tex += "\\noindent\\textit{Nếu bài toán có nhiều hơn hai biến, tập nghiệm tối ưu tổng quát có thể là một mặt lồi của miền nghiệm khả thi, không nhất thiết chỉ là đoạn thẳng nối hai điểm trên.}\n\n";
+                if (isWholeFeasibleRegionOptimalForReport) {
+                    tex += "\\noindent\\textbf{Một nghiệm tối ưu minh họa:} $" + varListTex + " = " + firstPointTex + "$\\\\[0.15cm]\n";
+                    tex += "\\noindent\\textbf{Một điểm khả thi minh họa khác:} $" + varListTex + " = " + secondPointTex + "$\\\\[0.15cm]\n";
+                    tex += "\\noindent\\textbf{Tập nghiệm tối ưu:} Toàn bộ miền nghiệm khả thi của bài toán gốc.\\\\[0.15cm]\n";
+                    tex += "\\noindent\\textit{Vì tất cả hệ số của các biến trong hàm mục tiêu đều bằng 0, nên $Z = c_0$ là hằng số trên mọi điểm khả thi. Do đó mọi điểm thỏa hệ ràng buộc đều là nghiệm tối ưu; không được kết luận tập nghiệm chỉ là đoạn nối giữa hai điểm minh họa.}\n\n";
+                } else {
+                    tex += "\\noindent\\textbf{Nghiệm tối ưu thứ nhất:} $" + varListTex + " = " + firstPointTex + "$\\\\[0.15cm]\n";
+                    tex += "\\noindent\\textbf{Nghiệm tối ưu thứ hai:} $" + varListTex + " = " + secondPointTex + "$\\\\[0.15cm]\n";
+                    if (isWholeOptimalLineForReport) {
+                        tex += "\noindent\textbf{Tập nghiệm tối ưu:} "
+                               "$\left\{ X(t) = " + firstPointTex +
+                               " + t " + directionTex +
+                               " \mid t \in \mathbb{R} \right\}$\\[0.15cm]\n";
+                        tex += "\noindent\textit{Tập nghiệm tối ưu là toàn bộ đường thẳng theo vector hướng trên, không chỉ là đoạn thẳng nối hai điểm.}\n\n";
+                    } else if (isForwardOptimalRayForReport) {
+                        tex += "\noindent\textbf{Tập nghiệm tối ưu:} "
+                               "$\left\{ X(t) = " + firstPointTex +
+                               " + t " + directionTex +
+                               " \mid t \ge 0 \right\}$\\[0.15cm]\n";
+                        tex += "\noindent\textit{Tập nghiệm tối ưu là một tia theo vector hướng trên; điểm thứ hai chỉ là điểm minh họa trên tia, không phải điểm cuối của đoạn.}\n\n";
+                    } else {
+                        tex += "\noindent\textbf{Tập nghiệm tối ưu:} "
+                               "$\left\{ X(\lambda) = \lambda " + firstPointTex +
+                               " + (1-\lambda) " + secondPointTex +
+                               " \mid 0 \le \lambda \le 1 \right\}$\\[0.15cm]\n";
+                        tex += "\noindent\textit{Các điểm thuộc tập trên đều là nghiệm tối ưu.}\\[0.15cm]\n";
+                        tex += "\noindent\textit{Nếu bài toán có nhiều hơn hai biến, tập nghiệm tối ưu tổng quát có thể là một mặt lồi của miền nghiệm khả thi, không nhất thiết chỉ là đoạn thẳng nối hai điểm trên.}\n\n";
+                    }
+                }
             } else {
                 tex += "\\noindent\\textbf{Nghiệm tối ưu:} $" + varListTex + " = " + optSolTex + "$\n\n";
             }
@@ -1850,7 +2091,13 @@ void WdSolve::displayResults(const LinearProgram& lp,
     ui->table_solution->horizontalHeader()->setStyleSheet("");
 
     if (status == "Tối ưu" || status == "Vô số nghiệm") {
-        double finalZ = optimalZ;
+        // [FIX OBJECTIVE CONSTANT c_0]
+        // Không lấy nguyên optimalZ từ tableau vì một số case có hằng số tự do
+        // trong hàm mục tiêu, ví dụ Max Z = x1 + x2 + 1.
+        // Giá trị hiển thị phải được tính lại từ hàm mục tiêu gốc.
+        double finalZ = solution.empty()
+                            ? optimalZ
+                            : evaluateOriginalObjectiveValue(originalLp, solution);
         if (status == "Vô số nghiệm")
             ui->lineEdit_Z->setText(QString::number(finalZ, 'f', 4) + " (Vô số nghiệm)");
         else
@@ -1865,7 +2112,7 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
         QStringList headers;
         if (isInfinite) {
-            headers << "Biến" << "Đỉnh 1" << "Đỉnh 2" << "Vector hướng (V)";
+            headers << "Biến" << "Điểm 1" << "Điểm 2" << "Vector hướng (V)";
         } else {
             headers << "Biến" << "Giá trị";
         }
@@ -1922,6 +2169,18 @@ void WdSolve::displayResults(const LinearProgram& lp,
             QString firstPoint = makePointDisplay(solution);
             QString secondPoint = makePointDisplay(altSolution);
 
+            std::vector<double> direction = buildOptimalDirectionVector(solution, altSolution, origN);
+            QString directionPoint = makePointDisplay(direction);
+            bool isWholeOptimalLineForUi =
+                (origN == 2) && isFullOptimalLineSet(originalLp, solution, altSolution);
+
+            bool isForwardOptimalRayForUi =
+                !isWholeOptimalLineForUi &&
+                isForwardOptimalRaySet(originalLp, solution, altSolution);
+
+            bool isWholeFeasibleRegionOptimalForUi =
+                isObjectiveConstantOnOriginalVariables(originalLp);
+
             int setRow = origN;
             int noteRow = origN + 1;
 
@@ -1940,11 +2199,24 @@ void WdSolve::displayResults(const LinearProgram& lp,
             itemSetLabel->setBackground(labelBg);
             ui->table_solution->setItem(setRow, 0, itemSetLabel);
 
-            QTableWidgetItem *itemSet = new QTableWidgetItem(
-                "X(λ) = λ" + firstPoint +
-                " + (1 - λ)" + secondPoint +
-                ", 0 ≤ λ ≤ 1. Tất cả các điểm thuộc tập này đều là nghiệm tối ưu."
-                );
+            QString optimalSetText;
+            if (isWholeFeasibleRegionOptimalForUi) {
+                optimalSetText = "Tập nghiệm tối ưu là toàn bộ miền nghiệm khả thi: {X | X thỏa tất cả ràng buộc của bài toán gốc}.";
+            } else if (isWholeOptimalLineForUi) {
+                optimalSetText = "X(t) = " + firstPoint +
+                                 " + t" + directionPoint +
+                                 ", t ∈ R. Tập nghiệm tối ưu là toàn bộ đường thẳng theo vector hướng trên.";
+            } else if (isForwardOptimalRayForUi) {
+                optimalSetText = "X(t) = " + firstPoint +
+                                 " + t" + directionPoint +
+                                 ", t ≥ 0. Tập nghiệm tối ưu là một tia theo vector hướng trên.";
+            } else {
+                optimalSetText = "X(λ) = λ" + firstPoint +
+                                 " + (1 - λ)" + secondPoint +
+                                 ", 0 ≤ λ ≤ 1. Tất cả các điểm thuộc tập này đều là nghiệm tối ưu.";
+            }
+
+            QTableWidgetItem *itemSet = new QTableWidgetItem(optimalSetText);
             itemSet->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
             itemSet->setBackground(contentBg);
             itemSet->setToolTip(itemSet->text());
@@ -1956,10 +2228,21 @@ void WdSolve::displayResults(const LinearProgram& lp,
             itemNoteLabel->setBackground(noteLabelBg);
             ui->table_solution->setItem(noteRow, 0, itemNoteLabel);
 
-            QTableWidgetItem *itemNote = new QTableWidgetItem(
-                "Nếu bài toán có nhiều hơn hai biến, tập nghiệm tối ưu tổng quát có thể là một mặt lồi của miền nghiệm khả thi; "
-                "không nhất thiết chỉ là đoạn thẳng nối hai điểm trên."
-                );
+            QString optimalSetNote;
+            if (isWholeFeasibleRegionOptimalForUi) {
+                optimalSetNote = "Vì tất cả hệ số của các biến trong hàm mục tiêu đều bằng 0, Z = c0 là hằng số trên mọi điểm khả thi. Do đó mọi điểm thỏa hệ ràng buộc đều là nghiệm tối ưu; hai điểm ở bảng chỉ là điểm minh họa, không phải biên của tập nghiệm.";
+            } else if (isWholeOptimalLineForUi) {
+                optimalSetNote = "Với bài toán này, vector hướng không làm thay đổi hệ ràng buộc và hàm mục tiêu, nên tham số t chạy trên toàn bộ R; "
+                                 "không bị giới hạn trong đoạn giữa hai điểm.";
+            } else if (isForwardOptimalRayForUi) {
+                optimalSetNote = "Điểm thứ hai chỉ là điểm minh họa trên tia tối ưu. Vì hướng này vẫn giữ nguyên giá trị hàm mục tiêu và không vi phạm ràng buộc khi t ≥ 0, "
+                                 "tập nghiệm phải viết theo dạng tia, không phải đoạn λ giữa hai điểm.";
+            } else {
+                optimalSetNote = "Nếu bài toán có nhiều hơn hai biến, tập nghiệm tối ưu tổng quát có thể là một mặt lồi của miền nghiệm khả thi; "
+                                 "không nhất thiết chỉ là đoạn thẳng nối hai điểm trên.";
+            }
+
+            QTableWidgetItem *itemNote = new QTableWidgetItem(optimalSetNote);
             itemNote->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
             itemNote->setBackground(noteBg);
             itemNote->setToolTip(itemNote->text());
@@ -2171,11 +2454,11 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
         QString vocabOptZ, tableOptZ;
         if (originalLp.isMaximize) {
-            vocabOptZ = "Đối với hàm mục tiêu, vì bài toán gốc là <b>Max Z</b> nên thuật toán đã giải thông qua việc tìm <b>Min(-Z)</b>. Do đó, giá trị lớn nhất của Z sẽ bằng đảo dấu của hằng số tự do trong phương trình -Z hiện tại.";
-            tableOptZ = "Đối với hàm mục tiêu, vì bài toán gốc là <b>Max Z</b> nên thuật toán đã giải thông qua việc tìm <b>Min(-Z)</b>. Do đó, giá trị lớn nhất của Z sẽ bằng đảo dấu của giá trị tại cột RHS của dòng -Z trong bảng hiện tại.";
+            vocabOptZ = "Vì bài toán gốc là <b>Max Z</b>, thuật toán có thể hiển thị dòng mục tiêu dưới dạng <b>-Z</b> hoặc giải thông qua <b>Min(-Z)</b>. Tuy nhiên, giá trị tối ưu cuối cùng phải được tính lại theo hàm mục tiêu gốc <b>Z = c0 + Σcjxj</b>. Sau khi đọc được nghiệm tối ưu, thay nghiệm đó vào hàm mục tiêu ban đầu để thu được giá trị lớn nhất của Z.";
+            tableOptZ = "Giá trị tối ưu cuối cùng không nên chỉ đọc máy móc từ RHS của dòng mục tiêu. Sau khi có nghiệm tối ưu, phần mềm tính lại theo hàm mục tiêu gốc <b>Z = c0 + Σcjxj</b>, nên vẫn đúng khi hàm mục tiêu có hằng số tự do.";
         } else {
-            vocabOptZ = "Đối với hàm mục tiêu, giá trị nhỏ nhất của <b>Min Z</b> chính là hằng số tự do trong phương trình Z hiện tại.";
-            tableOptZ = "Đối với hàm mục tiêu, giá trị nhỏ nhất của <b>Min Z</b> chính là giá trị tại cột RHS của dòng Z trong bảng hiện tại.";
+            vocabOptZ = "Giá trị tối ưu cuối cùng phải được tính lại theo hàm mục tiêu gốc <b>Z = c0 + Σcjxj</b>. Sau khi đọc được nghiệm tối ưu, thay nghiệm đó vào hàm mục tiêu ban đầu để thu được giá trị nhỏ nhất của Z.";
+            tableOptZ = "Giá trị tối ưu cuối cùng không nên chỉ đọc máy móc từ RHS của dòng mục tiêu. Sau khi có nghiệm tối ưu, phần mềm tính lại theo hàm mục tiêu gốc <b>Z = c0 + Σcjxj</b>, nên vẫn đúng khi hàm mục tiêu có hằng số tự do.";
         }
 
         QString commonIntroHtml = "";
@@ -2193,6 +2476,10 @@ void WdSolve::displayResults(const LinearProgram& lp,
 
             QString origZStr = (originalLp.isMaximize ? "Max Z = " : "Min Z = ");
             bool isFirstOrig = true;
+            if (std::abs(originalLp.c_0) > 1e-9) {
+                origZStr += QString::number(originalLp.c_0, 'f', 2);
+                isFirstOrig = false;
+            }
             for (size_t i = 0; i < originalLp.c.size(); ++i) {
                 if (std::abs(originalLp.c[i]) > 1e-9) {
                     double val = originalLp.c[i];
@@ -2224,6 +2511,89 @@ void WdSolve::displayResults(const LinearProgram& lp,
             if (!isBasic) nonBasicVars.push_back(j);
         }
 
+        // ===================================================================
+        // [GIẢI THÍCH CƠ SỞ KHẢ THI BAN ĐẦU]
+        // Chỉ thêm lời giải thích cho trường hợp chạy phương pháp Đơn hình trực tiếp
+        // và ở từ vựng khởi tạo. Không thay đổi thuật toán, bảng nghiệm hay logic xoay.
+        // ===================================================================
+        if (stepIdx == 0 && !isPhase1) {
+            QStringList basicVarNames;
+            QStringList basicValueTexts;
+            QStringList nonBasicVarNames;
+            QStringList nonBasicZeroTexts;
+
+            bool allBasicValuesNonNegative = true;
+
+            auto formatInitialBasisValue = [](double val) -> QString {
+                if (std::abs(val) < 1e-9) val = 0.0;
+                return QString::number(val, 'f', 2);
+            };
+
+            for (int r = 0; r < m; ++r) {
+                int basicVarIndex = step.currentBasicVars[r];
+                if (basicVarIndex >= 0 && basicVarIndex < (int)varNames.size()) {
+                    QString varName = varNames[basicVarIndex];
+                    double rhsVal = step.matrix[r][n];
+                    if (std::abs(rhsVal) < 1e-9) rhsVal = 0.0;
+
+                    basicVarNames << varName;
+                    basicValueTexts << QString("%1 = %2").arg(varName).arg(formatInitialBasisValue(rhsVal));
+
+                    if (rhsVal < -1e-9) {
+                        allBasicValuesNonNegative = false;
+                    }
+                }
+            }
+
+            for (int idx : nonBasicVars) {
+                if (idx >= 0 && idx < (int)varNames.size()) {
+                    QString varName = varNames[idx];
+                    nonBasicVarNames << varName;
+                    nonBasicZeroTexts << QString("%1 = 0").arg(varName);
+                }
+            }
+
+            if (!basicVarNames.isEmpty()) {
+                // [FIX DARK THEME]
+                // Block giải thích cơ sở khả thi ban đầu phải đồng bộ màu với theme hiện tại.
+                // Không dùng nền sáng #eef7ff trong dark mode vì bị lệch giao diện.
+                bool initialBasisDarkMode = readDarkModeSetting();
+                QString initialBasisBg      = initialBasisDarkMode ? "#1E2030" : "#eef7ff";
+                QString initialBasisBorder  = initialBasisDarkMode ? "#89B4FA" : "#2b7cff";
+                QString initialBasisText    = initialBasisDarkMode ? "#CDD6F4" : "#333333";
+                QString initialBasisTitle   = initialBasisDarkMode ? "#89B4FA" : "#0056b3";
+
+                commonIntroHtml += "<div style='background-color: " + initialBasisBg +
+                                   "; padding: 10px 15px; border-left: 4px solid " + initialBasisBorder +
+                                   "; margin-bottom: 12px; font-size: 11.5pt; color: " + initialBasisText +
+                                   "; border-radius: 4px;'>";
+                commonIntroHtml += "<b style='color: " + initialBasisTitle + ";'>Giải thích cơ sở khả thi ban đầu:</b><br/>";
+                commonIntroHtml += "Phương pháp đơn hình cần bắt đầu từ một nghiệm cơ sở khả thi. Ở bài toán này, phần mềm tìm được cơ sở khả thi trực tiếp từ các biến hiện có nên có thể giải bằng phương pháp đơn hình mà không cần thêm biến giả như phương pháp 2 pha.<br/>";
+
+                commonIntroHtml += "Cơ sở ban đầu: <b>" + basicVarNames.join(", ") + "</b>.";
+                if (!nonBasicVarNames.isEmpty()) {
+                    commonIntroHtml += " Các biến không cơ sở: <b>" + nonBasicVarNames.join(", ") + "</b>.";
+                }
+                commonIntroHtml += "<br/>";
+
+                if (!nonBasicZeroTexts.isEmpty()) {
+                    commonIntroHtml += "Khi cho " + nonBasicZeroTexts.join(", ") + ", ta đọc được ";
+                } else {
+                    commonIntroHtml += "Từ từ vựng khởi tạo, ta đọc được ";
+                }
+
+                commonIntroHtml += "<b>" + basicValueTexts.join(", ") + "</b>.";
+
+                if (allBasicValuesNonNegative) {
+                    commonIntroHtml += " Vì các giá trị cơ sở này đều không âm nên nghiệm ban đầu là khả thi.";
+                } else {
+                    commonIntroHtml += " Nếu có giá trị cơ sở âm thì cơ sở này chưa khả thi và cần xử lý bằng bước khởi tạo khác.";
+                }
+
+                commonIntroHtml += "</div>";
+            }
+        }
+
         if (step.pivotCol >= 0 && step.pivotRow >= 0) {
             QString enterVar = (step.pivotCol < (int)varNames.size()) ? varNames[step.pivotCol] : "?";
             QString leaveVar = (step.currentBasicVars[step.pivotRow] != -1 && step.currentBasicVars[step.pivotRow] < (int)varNames.size()) ? varNames[step.currentBasicVars[step.pivotRow]] : "?";
@@ -2233,18 +2603,23 @@ void WdSolve::displayResults(const LinearProgram& lp,
                                        .arg(enterVar).arg(leaveVar);
             } else {
                 if (status.contains("Vô số nghiệm", Qt::CaseInsensitive) && stepIdx == modHistory.size() - 2) {
-                    commonIntroHtml += QString("<p style='color: #333333; font-size: 12pt; margin-bottom: 4px; margin-top: 8px; font-style: italic;'>&rarr; Chọn <b><font color='green'>%1</font></b> làm biến vào, đẩy <b><font color='red'>%2</font></b> ra khỏi cơ sở.</p>")
+                    commonIntroHtml += "<p style='color: #89B4FA; font-size: 12pt; margin-bottom: 4px; margin-top: 8px; font-weight: bold;'>Bước tiếp theo:</p>";
+                    commonIntroHtml += QString("<p style='color: #333333; font-size: 12pt; margin-bottom: 4px; margin-top: 0px; font-style: italic;'>&rarr; Chọn <b><font color='green'>%1</font></b> làm biến vào, đẩy <b><font color='red'>%2</font></b> ra khỏi cơ sở.</p>")
                                            .arg(enterVar).arg(leaveVar);
-                    commonIntroHtml += "<p style='color: #d9534f; font-size: 12pt; margin-bottom: 4px; margin-top: 0px;'>&rarr; <b>Kết luận:</b> Đã đạt [TU_VUNG_BANG] tối ưu (có vô số nghiệm).</p>";
-                    commonIntroHtml += "<p style='color: #0056b3; font-size: 11.5pt; margin-bottom: 15px; margin-top: 0px; font-style: italic;'>";
+                    QString infiniteConclusionColor = isDark ? "#F38BA8" : "#d9534f";
+                    QString infiniteExplainColor = tabSelectedColor;
 
-                    commonIntroHtml += "<b>* Giải thích vô số nghiệm:</b> vì tồn tại hệ số của biến không cơ sở ở hàm mục tiêu bằng 0 nên có vô số nghiệm tối ưu.<br>";
+                    commonIntroHtml += "<p style='color: " + infiniteConclusionColor + "; font-size: 12pt; margin-bottom: 4px; margin-top: 0px;'>&rarr; <b>Kết luận:</b> Đã đạt [TU_VUNG_BANG] tối ưu (có vô số nghiệm).</p>";
+                    commonIntroHtml += "<p style='color: " + infiniteExplainColor + "; font-size: 11.5pt; margin-bottom: 15px; margin-top: 0px; font-style: italic;'>";
+
+                    commonIntroHtml += "<b>* Giải thích vô số nghiệm:</b> Ở từ vựng tối ưu, tồn tại biến không cơ sở có hệ số mục tiêu bằng 0 và khi thay đổi biến này theo hướng khả thi thì nghiệm gốc thay đổi nhưng giá trị hàm mục tiêu vẫn giữ nguyên. Vì vậy bài toán có nhiều nghiệm khả thi khác nhau cùng đạt giá trị tối ưu.<br>";
                     commonIntroHtml += "<b>* Giải thích cách đọc nghiệm:</b> [READ_SOLUTION]<br>";
                     commonIntroHtml += "<b>* Giải thích giá trị tối ưu:</b> [OPT_Z]<br>";
                     commonIntroHtml += "<b>* Lưu ý:</b> Bước xoay tiếp theo chỉ để tìm tọa độ tối ưu thứ 2.";
                     commonIntroHtml += "</p>";
                 } else {
-                    commonIntroHtml += QString("<p style='color: #333333; font-size: 12pt; margin-bottom: 20px; font-style: italic;'>&rarr; Chọn <b><font color='green'>%1</font></b> làm biến vào, đẩy <b><font color='red'>%2</font></b> ra khỏi cơ sở.</p>")
+                    commonIntroHtml += "<p style='color: #89B4FA; font-size: 12pt; margin-bottom: 4px; margin-top: 8px; font-weight: bold;'>Bước tiếp theo:</p>";
+                    commonIntroHtml += QString("<p style='color: #333333; font-size: 12pt; margin-bottom: 20px; margin-top: 0px; font-style: italic;'>&rarr; Chọn <b><font color='green'>%1</font></b> làm biến vào, đẩy <b><font color='red'>%2</font></b> ra khỏi cơ sở.</p>")
                                            .arg(enterVar).arg(leaveVar);
                 }
             }

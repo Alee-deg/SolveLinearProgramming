@@ -266,8 +266,9 @@ void SimplexSolver::addSlackAndSurplusVariables() {
     // - Ràng buộc = : giữ đúng bản chất phương trình, sau đó chọn một
     //   biến hiện có làm biến cơ sở bằng phép khử Gauss-Jordan.
     //
-    // Lý do: nếu thêm cột +1 cho ràng buộc "=", bài toán bị nới lỏng
-    // thành dạng <= và có thể cho nghiệm sai.
+    // [FIX RÀNG BUỘC "=" PHỤ THUỘC TUYẾN TÍNH]
+    // Nếu sau khử xuất hiện dòng 0 = 0 thì đó là ràng buộc dư, phải bỏ qua.
+    // Nếu xuất hiện dòng 0 = b với b != 0 thì hệ vô nghiệm.
     // ===================================================================
 
     // 1) Thêm slack chỉ cho các ràng buộc <=.
@@ -321,6 +322,26 @@ void SimplexSolver::addSlackAndSurplusVariables() {
     for (int i = 0; i < m; ++i) {
         if (basicVariables[i] != -1) continue;
 
+        bool zeroRowBeforePivot = true;
+        for (int j = 0; j < (int)lp.c.size(); ++j) {
+            if (std::abs(lp.A[i][j]) > CLEAN_EPS) {
+                zeroRowBeforePivot = false;
+                break;
+            }
+        }
+
+        if (zeroRowBeforePivot) {
+            if (std::abs(lp.b[i]) <= CLEAN_EPS) {
+                // Dòng 0 = 0: ràng buộc dư, sẽ được xóa ở cuối hàm.
+                lp.b[i] = 0.0;
+                continue;
+            }
+
+            // Dòng 0 = b khác 0: hệ ràng buộc mâu thuẫn.
+            statusMsg = "Vô nghiệm (ràng buộc bằng phụ thuộc tuyến tính nhưng vế phải mâu thuẫn).";
+            continue;
+        }
+
         int pivotCol = -1;
         double bestAbs = 0.0;
 
@@ -334,6 +355,20 @@ void SimplexSolver::addSlackAndSurplusVariables() {
         }
 
         if (pivotCol == -1 || bestAbs <= CLEAN_EPS) {
+            bool zeroRow = true;
+            for (int j = 0; j < (int)lp.c.size(); ++j) {
+                if (std::abs(lp.A[i][j]) > CLEAN_EPS) {
+                    zeroRow = false;
+                    break;
+                }
+            }
+
+            if (zeroRow && std::abs(lp.b[i]) <= CLEAN_EPS) {
+                // Dòng 0 = 0: ràng buộc dư, không phải lỗi.
+                lp.b[i] = 0.0;
+                continue;
+            }
+
             statusMsg = "Không tạo được cơ sở ban đầu cho ràng buộc bằng (=).";
             continue;
         }
@@ -362,6 +397,33 @@ void SimplexSolver::addSlackAndSurplusVariables() {
         basicVariables[i] = pivotCol;
         usedBasicCols.insert(pivotCol);
     }
+
+    // 4) Xóa các dòng ràng buộc dư 0 = 0.
+    //    Việc này xử lý đúng case:
+    //      x1 + x2 = 2
+    //      x1 - x2 = 0
+    //      2x1     = 2
+    //    Sau khử, một dòng có thể trở thành 0 = 0, không được báo lỗi.
+    for (int i = (int)lp.A.size() - 1; i >= 0; --i) {
+        bool zeroRow = true;
+        for (int j = 0; j < (int)lp.c.size(); ++j) {
+            if (std::abs(lp.A[i][j]) > CLEAN_EPS) {
+                zeroRow = false;
+                break;
+            }
+        }
+
+        if (zeroRow) {
+            if (std::abs(lp.b[i]) <= CLEAN_EPS) {
+                lp.A.erase(lp.A.begin() + i);
+                lp.b.erase(lp.b.begin() + i);
+                lp.signs.erase(lp.signs.begin() + i);
+                basicVariables.erase(basicVariables.begin() + i);
+            } else {
+                statusMsg = "Vô nghiệm (ràng buộc bằng phụ thuộc tuyến tính nhưng vế phải mâu thuẫn).";
+            }
+        }
+    }
 }
 
 
@@ -383,7 +445,8 @@ void SimplexSolver::addSlackAndSurplusVariables() {
 bool SimplexSolver::solve() {
     convertToStandardForm();
 
-    if (statusMsg.contains("Không tạo được cơ sở", Qt::CaseInsensitive)) {
+    if (statusMsg.contains("Không tạo được cơ sở", Qt::CaseInsensitive) ||
+        statusMsg.contains("Vô nghiệm", Qt::CaseInsensitive)) {
         return false;
     }
 
@@ -397,8 +460,9 @@ bool SimplexSolver::solve() {
     // Pha 1 ở đây chỉ dùng MỘT biến giả duy nhất x0/a0.
     if (needsPhase1 || lp.algoType == 2) {
         if (needsPhase1 && (lp.algoType == 0 || lp.algoType == 1)) {
-            statusMsg = "Không giải được với thuật toán Đơn hình! "
-                        "(Tồn tại hệ số b_i âm ở dạng chuẩn, bạn có thể sử dụng đơn hình 2 pha hoặc chế độ tự động).";
+            statusMsg = "Không giải được với thuật toán Đơn hình!\n"
+                        "Lý do: Không tìm được nghiệm khả thi ban đầu\n"
+                        "Gợi ý: Vui lòng chọn phương pháp Hai pha.";
             return false;
         }
         return solveTwoPhase();
@@ -421,7 +485,7 @@ bool SimplexSolver::solve() {
             }
         }
 
-        if (isReallyDifferent) {
+        if (isReallyDifferent || statusMsg == "Vô số nghiệm") {
             statusMsg = "Vô số nghiệm";
         } else {
             statusMsg = "Tối ưu";
@@ -809,7 +873,7 @@ bool SimplexSolver::solveTwoPhase() {
                 }
             }
 
-            if (isReallyDifferent) {
+            if (isReallyDifferent || statusMsg == "Vô số nghiệm") {
                 statusMsg = "Vô số nghiệm";
             } else {
                 statusMsg = "Tối ưu";
@@ -928,12 +992,48 @@ void SimplexSolver::findAndRecordAlternativeOptimum() {
 
     bool foundDifferent = false;
 
+    auto mapExtendedSolutionToOriginal = [&](const std::vector<double>& extendedSol) {
+        int origCount = (int)originalVarBounds.size();
+        std::vector<double> sol(origCount, 0.0);
+
+        int internalIdx = 0;
+        for (int i = 0; i < origCount; ++i) {
+            const VarBound& vb = originalVarBounds[i];
+
+            if (vb.isFree || vb.sign == "free") {
+                double plusValue  = (internalIdx < (int)extendedSol.size()) ? extendedSol[internalIdx] : 0.0;
+                double minusValue = (internalIdx + 1 < (int)extendedSol.size()) ? extendedSol[internalIdx + 1] : 0.0;
+                sol[i] = plusValue - minusValue;
+                internalIdx += 2;
+            } else if (vb.sign == "<=") {
+                double value = (internalIdx < (int)extendedSol.size()) ? extendedSol[internalIdx] : 0.0;
+                sol[i] = -value;
+                internalIdx += 1;
+            } else {
+                double value = (internalIdx < (int)extendedSol.size()) ? extendedSol[internalIdx] : 0.0;
+                sol[i] = value;
+                internalIdx += 1;
+            }
+        }
+
+        return sol;
+    };
+
     // ===================================================================
-    // [FIX VÔ SỐ NGHIỆM VỚI BIẾN TỰ DO]
+    // [FIX VÔ SỐ NGHIỆM DẠNG TIA]
     //
-    // Không bỏ qua x_j^+, x_j^- nữa. Với biến tự do, hướng tối ưu có thể
-    // nằm ở chính các cột này. Sau khi pivot thử, getSolution() sẽ ánh xạ
-    // nghiệm nội bộ về nghiệm gốc để kiểm tra nghiệm có thật sự khác không.
+    // Nếu có biến phi cơ sở reduced cost = 0 nhưng findPivotRow(j) = -1,
+    // thì không pivot được vì không có hàng giới hạn. Với reduced cost = 0,
+    // đây không phải "không có nghiệm khác", mà là một TIA TỐI ƯU nếu hướng
+    // đó làm nghiệm gốc thay đổi.
+    //
+    // Ví dụ:
+    //     Min Z = x1
+    //     x1 <= 0
+    //     x1 >= 0, x2 >= 0
+    //
+    // Tối ưu tại mọi (0, t), t >= 0. Cột x2 có reduced cost = 0 và không có
+    // pivot row. Code cũ bỏ qua cột này rồi kết luận sai "Tối ưu".
     // ===================================================================
     for (int j = 0; j < n; ++j) {
         if (std::abs(tableau[m][j]) >= 1e8) continue; // bỏ qua biến giả x0 bị khóa Big-M
@@ -950,9 +1050,50 @@ void SimplexSolver::findAndRecordAlternativeOptimum() {
         if (!isBasic && std::abs(tableau[m][j]) <= CLEAN_EPS) {
             int altPivotRow = findPivotRow(j);
 
-            // Nếu cột này không có hàng xoay hợp lệ, không pivot vào cột đó.
-            // Tiếp tục thử các cột reduced cost = 0 khác.
             if (altPivotRow == -1) {
+                // Không có hàng giới hạn: thử đi theo tia với t = 1.
+                std::vector<double> extendedSol(n, 0.0);
+
+                for (int row = 0; row < m; ++row) {
+                    int basicVar = basicVariables[row];
+                    if (basicVar >= 0 && basicVar < n) {
+                        extendedSol[basicVar] = tableau[row][n] - tableau[row][j];
+                        if (std::abs(extendedSol[basicVar]) < CLEAN_EPS)
+                            extendedSol[basicVar] = 0.0;
+                    }
+                }
+
+                extendedSol[j] = 1.0;
+
+                bool feasibleDirection = true;
+                for (double value : extendedSol) {
+                    if (value < -CLEAN_EPS) {
+                        feasibleDirection = false;
+                        break;
+                    }
+                }
+
+                if (!feasibleDirection) {
+                    continue;
+                }
+
+                std::vector<double> tempSol = mapExtendedSolutionToOriginal(extendedSol);
+
+                bool isDifferent = false;
+                for (size_t k = 0; k < firstSolution.size(); ++k) {
+                    if (std::abs(firstSolution[k] - tempSol[k]) > CLEAN_EPS) {
+                        isDifferent = true;
+                        break;
+                    }
+                }
+
+                if (isDifferent) {
+                    this->altSolution = tempSol;
+                    statusMsg = "Vô số nghiệm";
+                    foundDifferent = true;
+                    break;
+                }
+
                 continue;
             }
 

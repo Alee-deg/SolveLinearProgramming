@@ -430,10 +430,25 @@ void WdShowImage::drawGraph(const LinearProgram& lp,
     // Chuyển đổi mọi ràng buộc về dạng <=
     for (size_t i = 0; i < origLp.A.size(); ++i) {
         if (origLp.A[i].size() < 2) continue;
+
         double a = origLp.A[i][0], b = origLp.A[i][1], c = origLp.b[i];
-        if (origLp.signs[i] == "<=")        ineqs.push_back({a,  b,  c});
-        else if (origLp.signs[i] == ">=")  ineqs.push_back({-a, -b, -c});
-        else if (origLp.signs[i] == "==") { // Ràng buộc '=' tương đương 2 ràng buộc <= và >=
+        QString sign = (i < origLp.signs.size()) ? origLp.signs[i].trimmed() : "";
+
+        if (sign == "<=") {
+            ineqs.push_back({a,  b,  c});
+        }
+        else if (sign == ">=") {
+            ineqs.push_back({-a, -b, -c});
+        }
+        else if (sign == "=" || sign == "==") {
+            // [FIX EQUALITY GEOMETRY]
+            // Ràng buộc "=" phải được giữ đúng là đường thẳng bắt buộc.
+            // Khi tính miền nghiệm, nó tương đương đồng thời:
+            //      a*x1 + b*x2 <= c
+            // và  a*x1 + b*x2 >= c  <=>  -a*x1 - b*x2 <= -c
+            //
+            // Bản cũ chỉ nhận "==" nên khi UI truyền dấu "=",
+            // ràng buộc bằng bị bỏ qua và đồ thị tô sai thành một vùng.
             ineqs.push_back({ a,  b,  c});
             ineqs.push_back({-a, -b, -c});
         }
@@ -530,6 +545,47 @@ void WdShowImage::drawGraph(const LinearProgram& lp,
         region->setData(pT, pX, pY);
         region->setBrush(QBrush(isDark ? QColor(243, 139, 168, 60) : QColor(255, 0, 0, 80))); // Tô màu vùng
         region->setPen(Qt::NoPen);
+    }
+    else if (vertices.size() == 2) {
+        // [FIX EQUALITY GEOMETRY]
+        // Miền nghiệm có thể là một đoạn thẳng nếu có ràng buộc "=".
+        // Trường hợp này không được tô thành vùng có diện tích.
+        QCPCurve *segment = new QCPCurve(ui->plot->xAxis, ui->plot->yAxis);
+        QVector<double> pT, pX, pY;
+        pT << 0 << 1;
+        pX << vertices[0].x() << vertices[1].x();
+        pY << vertices[0].y() << vertices[1].y();
+
+        segment->setData(pT, pX, pY);
+        segment->setPen(QPen(isDark ? QColor("#F38BA8") : Qt::red, 4, Qt::SolidLine));
+        segment->setBrush(Qt::NoBrush);
+    }
+    else if (vertices.size() == 1) {
+        // [FIX EQUALITY GEOMETRY]
+        // Miền nghiệm chỉ là một điểm, ví dụ:
+        //   x1 + x2 = 2, x1 - x2 = 0, 2x1 = 2
+        // thì miền nghiệm đúng là duy nhất (1, 1), không phải một vùng tô đỏ.
+        QCPGraph *pointGraph = ui->plot->addGraph();
+        pointGraph->setLineStyle(QCPGraph::lsNone);
+        pointGraph->setScatterStyle(
+            QCPScatterStyle(QCPScatterStyle::ssDisc,
+                            isDark ? QColor("#F38BA8") : Qt::red,
+                            isDark ? QColor("#F38BA8") : Qt::red,
+                            10)
+            );
+
+        QVector<double> pX, pY;
+        pX << vertices[0].x();
+        pY << vertices[0].y();
+        pointGraph->setData(pX, pY);
+
+        QCPItemText *pointLabel = new QCPItemText(ui->plot);
+        pointLabel->position->setCoords(vertices[0].x() + 0.25, vertices[0].y() + 0.25);
+        pointLabel->setText(QString("Miền nghiệm: (%1, %2)")
+                                .arg(vertices[0].x(), 0, 'f', 2)
+                                .arg(vertices[0].y(), 0, 'f', 2));
+        pointLabel->setColor(isDark ? QColor("#F38BA8") : Qt::red);
+        pointLabel->setFont(QFont("Arial", 10, QFont::Bold));
     }
 
     // -------------------------------------------------------------------

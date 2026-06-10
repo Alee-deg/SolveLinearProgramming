@@ -1041,57 +1041,103 @@ Dashboard::Dashboard(QWidget *parent)
             };
 
             auto handleNote = [&]() {
-                std::vector<int> checkedIndexes = getCheckedHistoryIndexes();
-                int noteIndex = -1;
+                std::vector<int> noteIndexes = getCheckedHistoryIndexes();
 
-                if (checkedIndexes.size() > 1) {
-                    QMessageBox::warning(
-                        &historyDialog,
-                        "Thông báo",
-                        "Bạn chỉ được chọn 1 bài toán để ghi chú.\n"
-                        "Vui lòng bỏ chọn các bài toán còn lại."
-                        );
+                // [FIX HISTORY NOTE MULTI SELECT]
+                // Cho phép ghi chú nhiều bài cùng lúc:
+                // - Nếu người dùng tick nhiều dòng: áp dụng cùng một ghi chú cho toàn bộ dòng đã tick.
+                // - Nếu không tick dòng nào: ghi chú cho dòng đang chọn hiện tại.
+                // Không thay đổi logic xóa / tải lại dữ liệu.
+                if (noteIndexes.empty()) {
+                    QListWidgetItem *selectedItem = listWidget->currentItem();
+                    if (!selectedItem || selectedItem->data(Qt::UserRole).toInt() == -1) {
+                        QMessageBox::warning(&historyDialog, "Thông báo", "Vui lòng chọn hoặc tick ít nhất một bài toán để ghi chú.");
+                        return;
+                    }
+
+                    noteIndexes.push_back(selectedItem->data(Qt::UserRole).toInt());
+                }
+
+                std::sort(noteIndexes.begin(), noteIndexes.end());
+                noteIndexes.erase(std::unique(noteIndexes.begin(), noteIndexes.end()), noteIndexes.end());
+
+                std::vector<int> validNoteIndexes;
+                for (int idx : noteIndexes) {
+                    if (idx >= 0 && idx < (int)g_undoStack.size()) {
+                        validNoteIndexes.push_back(idx);
+                    }
+                }
+
+                if (validNoteIndexes.empty()) {
+                    QMessageBox::warning(&historyDialog, "Thông báo", "Không tìm thấy bài toán hợp lệ để ghi chú.");
                     return;
                 }
 
-                if (checkedIndexes.size() == 1) {
-                    noteIndex = checkedIndexes[0];
+                QString oldNote;
+                if (validNoteIndexes.size() == 1) {
+                    oldNote = g_undoStack[validNoteIndexes[0]].note;
                 } else {
-                    QListWidgetItem *selectedItem = listWidget->currentItem();
-                    if (!selectedItem || selectedItem->data(Qt::UserRole).toInt() == -1) {
-                        QMessageBox::warning(&historyDialog, "Thông báo", "Vui lòng chọn một bài toán để ghi chú.");
-                        return;
+                    // Nếu các bài đã chọn đang có cùng ghi chú thì điền sẵn ghi chú đó.
+                    // Nếu khác nhau thì để trống, tránh vô tình lấy ghi chú của một bài áp cho các bài khác.
+                    oldNote = g_undoStack[validNoteIndexes[0]].note;
+                    for (int idx : validNoteIndexes) {
+                        if (g_undoStack[idx].note != oldNote) {
+                            oldNote.clear();
+                            break;
+                        }
                     }
-                    noteIndex = selectedItem->data(Qt::UserRole).toInt();
                 }
 
-                if (noteIndex < 0 || noteIndex >= (int)g_undoStack.size()) return;
-
                 bool ok = false;
-                QString oldNote = g_undoStack[noteIndex].note;
+                QString title = (validNoteIndexes.size() == 1)
+                                    ? "Ghi chú bài toán"
+                                    : QString("Ghi chú %1 bài toán").arg(validNoteIndexes.size());
+
+                QString label = (validNoteIndexes.size() == 1)
+                                    ? "Nhập ghi chú cho bài toán đã chọn:"
+                                    : QString("Nhập ghi chú áp dụng cho %1 bài toán đã tick:").arg(validNoteIndexes.size());
+
                 QString newNote = QInputDialog::getMultiLineText(
                     &historyDialog,
-                    "Ghi chú bài toán",
-                    "Nhập ghi chú cho bài toán đã chọn:",
+                    title,
+                    label,
                     oldNote,
                     &ok
                     );
 
                 if (!ok) return;
 
-                g_undoStack[noteIndex].note = newNote.trimmed();
+                QString trimmedNote = newNote.trimmed();
+                for (int idx : validNoteIndexes) {
+                    g_undoStack[idx].note = trimmedNote;
+                }
+
                 saveHistoryToJson();
                 refreshSuggestions();
                 populateList();
 
-                // Giữ lại focus ở bài toán vừa ghi chú nếu nó còn đang hiển thị.
+                // Giữ lại tick/focus ở các bài vừa ghi chú nếu chúng còn đang hiển thị sau khi refresh.
+                bool focusedFirstVisibleItem = false;
                 for (int row = 0; row < listWidget->count(); ++row) {
                     QListWidgetItem *item = listWidget->item(row);
-                    if (item && item->data(Qt::UserRole).toInt() == noteIndex) {
-                        listWidget->setCurrentRow(row);
-                        break;
+                    if (!item) continue;
+
+                    int realIndex = item->data(Qt::UserRole).toInt();
+                    if (std::find(validNoteIndexes.begin(), validNoteIndexes.end(), realIndex) != validNoteIndexes.end()) {
+                        item->setCheckState(Qt::Checked);
+
+                        if (!focusedFirstVisibleItem) {
+                            listWidget->setCurrentRow(row);
+                            focusedFirstVisibleItem = true;
+                        }
                     }
                 }
+
+                QMessageBox::information(
+                    &historyDialog,
+                    "Đã lưu ghi chú",
+                    QString("Đã cập nhật ghi chú cho %1 bài toán.").arg(validNoteIndexes.size())
+                    );
             };
             connect(btnNote, &QPushButton::clicked, &historyDialog, handleNote);
 
