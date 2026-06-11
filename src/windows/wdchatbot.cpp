@@ -350,6 +350,25 @@ static QString getApiKeyPath() {
 }
 
 
+static bool readChatBotDarkModeSetting()
+{
+    QString appDataSettingsPath =
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/settings.ini";
+
+    if (QFile::exists(appDataSettingsPath)) {
+        QSettings appDataSettings(appDataSettingsPath, QSettings::IniFormat);
+        if (appDataSettings.contains("dark_mode")) {
+            return appDataSettings.value("dark_mode", false).toBool();
+        }
+    }
+
+    QSettings appDirSettings(QCoreApplication::applicationDirPath() + "/settings.ini",
+                             QSettings::IniFormat);
+    return appDirSettings.value("dark_mode", false).toBool();
+}
+
+
+
 // =======================================================================
 // [FIX API KEY GUIDE]
 // Hiển thị hướng dẫn lấy Groq API Key trực tiếp trong khung chat.
@@ -357,35 +376,78 @@ static QString getApiKeyPath() {
 // =======================================================================
 static QString buildApiKeyGuideHtml(const QString& reasonHtml = QString())
 {
+    // [FIX API KEY GUIDE THEME]
+    // Đồng bộ màu khung hướng dẫn lấy API Key với dark/light theme.
+    const bool isDark = readChatBotDarkModeSetting();
+
+    const QString textColor     = isDark ? "#CDD6F4" : "#222222";
+    const QString mutedColor    = isDark ? "#A6ADC8" : "#666666";
+    const QString titleColor    = isDark ? "#CDD6F4" : "#1f2937";
+    const QString linkColor     = isDark ? "#89B4FA" : "#0B72D9";
+    const QString panelBg       = isDark ? "#1E2030" : "rgba(245,247,250,0.75)";
+    const QString rowBg         = isDark ? "#25283A" : "#f3f5f8";
+    const QString borderColor   = isDark ? "#45475A" : "#d9dee8";
+    const QString warningBg     = isDark ? "rgba(243,139,168,0.12)" : "rgba(255,248,225,0.90)";
+    const QString warningBorder = isDark ? "#F38BA8" : "#f0c36d";
+    const QString warningText   = isDark ? "#F2CDCD" : "#333333";
+    const QString noteColor     = isDark ? "#F38BA8" : "#d9534f";
+    const QString codeBg        = isDark ? "#11111B" : "#eef1f6";
+    const QString codeColor     = isDark ? "#A6E3A1" : "#333333";
+
     QString reasonBlock;
     if (!reasonHtml.trimmed().isEmpty()) {
         reasonBlock =
-            "<div style='border:1px solid #f0c36d; border-radius:8px; padding:12px 16px; "
-            "background:rgba(255,248,225,0.90); margin-bottom:14px; font-size:16px;'>"
+            "<div style='border:1px solid " + warningBorder +
+            "; border-radius:8px; padding:12px 16px; background:" + warningBg +
+            "; color:" + warningText + "; margin-bottom:14px; font-size:17px;'>"
             + reasonHtml +
             "</div>";
     }
 
-    return QString(
-               "<div style='max-width: 920px; margin: 36px auto; font-size: 16px; line-height: 1.65;'>"
-               "<h2 style='text-align:center; margin-bottom: 12px; font-size:24px;'>🔑 Hướng dẫn cài đặt API Key cho Chatbot</h2>"
-               "<p style='text-align:center; color:#666; margin-top:0; font-size:16px;'>"
-               "Chatbot cần Groq API Key để gửi câu hỏi và nhận phản hồi."
-               "</p>"
-               ) + reasonBlock + QString(
-               "<div style='border:1px solid #d9dee8; border-radius:10px; padding:18px 24px; background:rgba(245,247,250,0.75);'>"
-               "<p><b>Bước 1:</b> Mở trình duyệt và truy cập "
-               "<a style='color:#0B72D9; text-decoration:underline; font-weight:bold;' href='https://console.groq.com/'>https://console.groq.com/</a></p>"
-               "<p><b>Bước 2:</b> Đăng nhập hoặc tạo tài khoản Groq.</p>"
-               "<p><b>Bước 3:</b> Vào mục <b>API Keys</b> trên thanh điều hướng.</p>"
-               "<p><b>Bước 4:</b> Nhấn <b>Create API Key</b>, đặt tên ví dụ "
-               "<code>PhanMemQHTT-Chatbot</code>, sau đó nhấn <b>Submit</b>.</p>"
-               "<p><b>Bước 5:</b> Nhấn <b>Copy</b> để sao chép API Key. "
-               "<span style='color:#d9534f;'><b>Lưu ý:</b> Key chỉ hiển thị một lần, không chia sẻ cho người khác.</span></p>"
-               "<p><b>Bước 6:</b> Gõ lệnh <code>/key</code> vào ô nhập bên dưới, dán API Key và nhấn <b>OK</b>.</p>"
-               "</div>"
+    auto stepRow = [&](const QString& content) -> QString {
+        return "<p style='background:" + rowBg +
+               "; color:" + textColor +
+               "; border:1px solid " + borderColor +
+               "; border-radius:6px; padding:8px 12px; margin:8px 0; "
+               "font-size:17px; line-height:1.55; text-align:left;'>" +
+               content +
+               "</p>";
+    };
 
-               "<p style='text-align:center; color:#666; margin-top:12px; font-size:16px;'>"
+    return QString(
+               "<div style='max-width: 940px; margin: 32px auto; "
+               "font-size:17px; line-height:1.65; color:" + textColor + ";'>"
+                             "<h2 style='text-align:center; margin-bottom:12px; font-size:26px; color:" + titleColor + ";'>"
+                              "🔑 Hướng dẫn cài đặt API Key cho Chatbot"
+                              "</h2>"
+                              "<p style='text-align:center; color:" + mutedColor + "; margin-top:0; font-size:17px;'>"
+                              "Chatbot cần Groq API Key để gửi câu hỏi và nhận phản hồi."
+                              "</p>"
+               ) + reasonBlock + QString(
+               "<div style='border:1px solid " + borderColor +
+               "; border-radius:10px; padding:18px 24px; background:" + panelBg +
+               "; color:" + textColor + ";'>"
+               ) +
+           stepRow("<b>Bước 1:</b> Mở trình duyệt và truy cập "
+                   "<a style='color:" + linkColor + "; text-decoration:underline; font-weight:bold;' "
+                                 "href='https://console.groq.com/'>https://console.groq.com/</a>") +
+           stepRow("<b>Bước 2:</b> Đăng nhập hoặc tạo tài khoản Groq.") +
+           stepRow("<b>Bước 3:</b> Vào mục <b>API Keys</b> trên thanh điều hướng.") +
+           stepRow("<b>Bước 4:</b> Nhấn <b>Create API Key</b>, đặt tên ví dụ "
+                   "<code style='background:" + codeBg + "; color:" + codeColor +
+                   "; padding:2px 6px; border-radius:4px;'>PhanMemQHTT-Chatbot</code>, "
+                   "sau đó nhấn <b>Submit</b>.") +
+           stepRow("<b>Bước 5:</b> Nhấn <b>Copy</b> để sao chép API Key. "
+                   "<span style='color:" + noteColor + ";'><b>Lưu ý:</b> Key chỉ hiển thị một lần, "
+                                 "không chia sẻ cho người khác.</span>") +
+           stepRow("<b>Bước 6:</b> Gõ lệnh "
+                   "<code style='background:" + codeBg + "; color:" + codeColor +
+                   "; padding:2px 6px; border-radius:4px;'>/key</code> "
+                   "vào ô nhập bên dưới, dán API Key và nhấn <b>OK</b>.") +
+           QString(
+               "</div>"
+               "<p style='text-align:center; color:" + mutedColor +
+               "; margin-top:12px; font-size:17px;'>"
                "Sau khi xác thực thành công, khung chat sẽ tự trở về chế độ hỏi/đáp bình thường."
                "</p>"
                "</div>"
@@ -402,27 +464,36 @@ static void showApiKeyGuideInChat(QTextEdit* chatDisplay, const QString& reasonH
 static void showChatReadyNormal(QTextEdit* chatDisplay)
 {
     if (!chatDisplay) return;
+
+    const bool isDark = readChatBotDarkModeSetting();
+    const QString mutedColor = isDark ? "#A6ADC8" : "#666666";
+
     chatDisplay->clear();
     chatDisplay->setHtml(
         "<div style='height:100%; display:flex; align-items:center; justify-content:center;'>"
-        "<div style='text-align:center; color:#666; font-size:16px; margin-top:220px;'>"
-        "Bạn có thể hỏi thêm về bài toán"
-        "</div>"
-        "</div>"
+        "<div style='text-align:center; color:" + mutedColor + "; font-size:17px; margin-top:220px;'>"
+                       "Bạn có thể hỏi thêm về bài toán"
+                       "</div>"
+                       "</div>"
         );
 }
 
 static void showChatReadyAfterApiKey(QTextEdit* chatDisplay)
 {
     if (!chatDisplay) return;
+
+    const bool isDark = readChatBotDarkModeSetting();
+    const QString mutedColor = isDark ? "#A6ADC8" : "#666666";
+    const QString okColor = isDark ? "#A6E3A1" : "#2e7d32";
+
     chatDisplay->clear();
     chatDisplay->setHtml(
         "<div style='height:100%; display:flex; align-items:center; justify-content:center;'>"
-        "<div style='text-align:center; color:#666; font-size:16px; margin-top:220px;'>"
-        "✅ API Key đã được xác thực thành công.<br>"
-        "Bạn có thể hỏi thêm về bài toán."
-        "</div>"
-        "</div>"
+        "<div style='text-align:center; color:" + mutedColor + "; font-size:17px; margin-top:220px;'>"
+                       "<span style='color:" + okColor + ";'>✅ API Key đã được xác thực thành công.</span><br>"
+                    "Bạn có thể hỏi thêm về bài toán."
+                    "</div>"
+                    "</div>"
         );
 }
 
@@ -504,12 +575,15 @@ static void checkSavedApiKeyOnStartup(WdChatBot* parentWindow, QTextEdit* chatDi
         return;
     }
 
+    const bool isDark = readChatBotDarkModeSetting();
+    const QString mutedColor = isDark ? "#A6ADC8" : "#666666";
+
     chatDisplay->setHtml(
         "<div style='height:100%; display:flex; align-items:center; justify-content:center;'>"
-        "<div style='text-align:center; color:#666; font-size:16px; margin-top:220px;'>"
-        "Đang kiểm tra API Key đã lưu..."
-        "</div>"
-        "</div>"
+        "<div style='text-align:center; color:" + mutedColor + "; font-size:17px; margin-top:220px;'>"
+                       "Đang kiểm tra API Key đã lưu..."
+                       "</div>"
+                       "</div>"
         );
 
     if (inputField) {
