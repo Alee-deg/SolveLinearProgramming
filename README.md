@@ -92,4 +92,4 @@ SolveLinearProgramming/
 ```
 
 Toàn bộ mã nguồn thuật toán(đơn hình, bland, 2 pha) được lưu trữ tại src/core/simplexsolver.cpp, 
-File Báo cáo, HDSD, Link&HD_Download_phanmem_va_setup_Sd_chatbot được lưu tại thư mục docs 
+File Báo cáo được lưu trữ tại thư mục docs 
